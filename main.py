@@ -226,15 +226,48 @@ async def load_text_from_upload(upload: UploadFile) -> str:
 
 @app.post("/clean_log")
 async def clean_log(request: Request):
-    """Action 1: Limpia códigos IRC del texto usando limpiador avanzado"""
+    """Action 1: Limpia códigos IRC del texto usando manejo robusto"""
     try:
+        # Leer el contenido con máxima tolerancia
         body = await request.body()
-        text_content = body.decode('utf-8', errors='ignore')
+        
+        # Intentar diferentes métodos de decodificación
+        try:
+            text_content = body.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                text_content = body.decode('latin-1')
+            except:
+                text_content = body.decode('utf-8', errors='replace')
+        
+        # Si el contenido parece estar escapado como JSON, intentar parsearlo
+        if text_content.startswith('{"') and '"text":' in text_content:
+            try:
+                import json
+                parsed = json.loads(text_content)
+                if 'text' in parsed:
+                    text_content = parsed['text']
+            except:
+                pass
+        
+        # Limpiar secuencias de escape unicode que vienen de ChatGPT
+        import codecs
+        try:
+            # Decodificar secuencias \uXXXX
+            text_content = codecs.decode(text_content, 'unicode_escape')
+        except:
+            pass
         
         if not text_content.strip():
-            raise HTTPException(400, "Contenido vacío")
+            return {
+                "status": "error",
+                "error": "Contenido vacío después de decodificación",
+                "cleaned_text": "",
+                "question_lines_found": 0
+            }
         
         print(f"DEBUG: Recibido texto de {len(text_content)} caracteres")
+        print(f"DEBUG: Primeros 100 chars: {repr(text_content[:100])}")
         
         # Limpieza con algoritmo avanzado
         cleaned = limpiar_log_irclog_avanzado(text_content)
@@ -253,7 +286,8 @@ async def clean_log(request: Request):
             "question_lines_found": len(buena_lines),
             "cleaned_text": cleaned,
             "preview_first_200": cleaned[:200],
-            "preview_last_200": cleaned[-200:] if len(cleaned) > 200 else ""
+            "preview_last_200": cleaned[-200:] if len(cleaned) > 200 else "",
+            "debug_original_start": repr(text_content[:50])
         }
         
     except Exception as e:
@@ -331,3 +365,4 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
