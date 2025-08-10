@@ -3,7 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import re
 from typing import List, Dict, Any
 import uvicorn
-import gc  # Para manejo de memoria
+import gc
+import codecs
 
 app = FastAPI(title="Trivial IRC Log Processor", version="2.1.0")
 
@@ -18,45 +19,53 @@ app.add_middleware(
 
 def limpiar_log_irclog_avanzado(text: str) -> str:
     """
-    Limpiador avanzado que maneja códigos IRC en formato \uXXXX
+    Limpiador avanzado que maneja códigos IRC en múltiples formatos
     """
     import re
     
-    # PRIMERO: Convertir códigos unicode escapados a caracteres reales
+    # PASO 1: Convertir códigos unicode escapados a caracteres reales
     try:
-        text = text.encode().decode('unicode_escape')
+        # Decodificar secuencias como \\u0003 a caracteres reales
+        text = codecs.decode(text, 'unicode_escape')
     except:
         pass
     
-    # Patrones de limpieza
+    # PASO 2: Patrones de limpieza IRC
     patterns = {
-        # Códigos de color (\x03 seguido de dígitos)
-        'color': re.compile(r'\x03\d{1,2}(?:,\d{1,2})?'),
+        # Códigos de color básicos
+        'color': re.compile(r'\x03\d{0,2}(?:,\d{1,2})?'),
         'bold': re.compile(r'\x02'),
         'italic': re.compile(r'\x1D'),
         'underline': re.compile(r'\x1F'),
         'reset': re.compile(r'\x0F'),
         'delete': re.compile(r'\x7F'),
         
-        # Códigos de color tipo "2,0" sueltos
+        # Códigos de color sueltos como "2,0" 
         'color_coords': re.compile(r'\b\d{1,2},\d{1,2}\b'),
         
-        # Secuencias ANSI
-        'ansi': re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'),
+        # Otros caracteres de control
+        'controls': re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F]'),
         
         # Múltiples espacios
-        'multiple_spaces': re.compile(r'\s{2,}'),
+        'spaces': re.compile(r'\s{2,}'),
     }
     
-    # Aplicar limpieza
-    cleaned = text
-    for pattern_name, pattern in patterns.items():
-        cleaned = pattern.sub('', cleaned)
+    # PASO 3: Aplicar limpieza línea por línea
+    lines = text.split('\n')
+    cleaned_lines = []
     
-    # Limpiar espacios múltiples y normalizar
-    cleaned = re.sub(r'\s+', ' ', cleaned)
+    for line in lines:
+        cleaned = line
+        
+        # Aplicar todos los patrones
+        for pattern in patterns.values():
+            cleaned = pattern.sub(' ', cleaned)
+        
+        # Normalizar espacios
+        cleaned = re.sub(r'\s+', ' ', cleaned.strip())
+        cleaned_lines.append(cleaned)
     
-    return cleaned
+    return '\n'.join(cleaned_lines)
 
 def detect_question_indices_simple(lines: List[str]) -> List[Dict]:
     """Detección súper simple de preguntas"""
@@ -64,26 +73,26 @@ def detect_question_indices_simple(lines: List[str]) -> List[Dict]:
     
     try:
         for i, line in enumerate(lines):
-            # Buscar simplemente "la buena:" o "las buenas:" (case insensitive)
             line_lower = line.lower()
             
+            # Buscar patrones de respuesta
             if 'la buena:' in line_lower or 'las buenas:' in line_lower:
-                print(f"DEBUG encontrada línea {i}: {line[:100]}")
+                print(f"DEBUG línea {i}: {line[:100]}")
                 
-                # Extraer respuesta de forma muy simple
+                # Extraer respuesta
                 if 'la buena:' in line_lower:
                     start_pos = line_lower.find('la buena:') + 9
                 else:
                     start_pos = line_lower.find('las buenas:') + 11
                 
-                # Buscar hasta "mandada por" o final
+                # Buscar final
                 end_pos = line_lower.find('mandada por', start_pos)
                 if end_pos == -1:
                     answer_text = line[start_pos:].strip()
                 else:
                     answer_text = line[start_pos:end_pos].strip()
                 
-                # Limpiar códigos residuales de la respuesta
+                # Limpiar respuesta
                 answer_clean = re.sub(r'\d+,\d+', '', answer_text)
                 answer_clean = re.sub(r'\s+', ' ', answer_clean).strip()
                 
@@ -126,11 +135,9 @@ def build_blocks_safe(raw_text: str) -> Dict[str, Any]:
         q_start = 0
         
         for block_num in range(num_blocks):
-            # Calcular preguntas en este bloque
             block_size = base_size + (1 if block_num < remainder else 0)
             q_end = q_start + block_size
             
-            # Línea final del bloque
             end_line = questions[q_end - 1]['line_index']
             
             # Construir preguntas del bloque
@@ -138,11 +145,9 @@ def build_blocks_safe(raw_text: str) -> Dict[str, Any]:
             for q_idx in range(q_start, q_end):
                 question = questions[q_idx]
                 
-                # Rango de líneas para esta pregunta
                 q_start_line = questions[q_idx - 1]['line_index'] + 1 if q_idx > 0 else start_line
                 q_end_line = question['line_index']
                 
-                # Texto de la pregunta
                 question_lines = lines[q_start_line:q_end_line + 1]
                 question_text = '\n'.join(question_lines)
                 
@@ -150,11 +155,11 @@ def build_blocks_safe(raw_text: str) -> Dict[str, Any]:
                     "idx": question['idx'],
                     "answer": question['answer'],
                     "line_range": [q_start_line, q_end_line],
-                    "text_raw": question_text[:1000],  # Limitar tamaño para evitar memoria
-                    "text_clean": question_text[:1000]  # Simplificado
+                    "text_raw": question_text[:1000],
+                    "text_clean": question_text[:1000]
                 })
             
-            # Texto del bloque completo
+            # Texto del bloque
             block_lines = lines[start_line:end_line + 1]
             block_text = '\n'.join(block_lines)
             
@@ -163,11 +168,9 @@ def build_blocks_safe(raw_text: str) -> Dict[str, Any]:
                 "q_index_range": [questions[q_start]['idx'], questions[q_end - 1]['idx']],
                 "line_range": [start_line, end_line],
                 "questions": block_questions,
-                "text_raw": block_text[:2000] if len(block_text) <= 2000 else block_text[:2000] + "...[truncado]",
-                "text_clean": ""  # Vacío para ahorrar memoria
+                "text_raw": block_text[:2000] if len(block_text) <= 2000 else block_text[:2000] + "...[truncado]"
             })
             
-            # Siguiente bloque
             start_line = end_line + 1
             q_start = q_end
         
@@ -195,29 +198,23 @@ async def count_lines(file: UploadFile = File(...)):
         print(f"DEBUG: Iniciando count_lines para {file.filename}")
         
         content = await file.read()
-        print(f"DEBUG: Leídos {len(content)} bytes")
-        
         text = content.decode('utf-8', errors='ignore')
         lines = text.split('\n')
-        print(f"DEBUG: {len(lines)} líneas totales")
         
         # Buscar líneas con "buena" en las primeras 100 líneas
         buena_samples = []
         buena_count = 0
         
-        for i, line in enumerate(lines[:100]):  # Solo primeras 100 líneas
+        for i, line in enumerate(lines[:100]):
             if 'buena' in line.lower():
                 buena_count += 1
                 buena_samples.append({
                     "line_number": i,
-                    "content": line[:150]  # Solo primeros 150 chars
+                    "content": line[:150]
                 })
         
-        # Liberar memoria
         del content, text, lines
         gc.collect()
-        
-        print(f"DEBUG: Encontradas {buena_count} líneas con 'buena'")
         
         return {
             "filename": file.filename,
@@ -228,30 +225,65 @@ async def count_lines(file: UploadFile = File(...)):
         }
         
     except Exception as e:
-        print(f"ERROR en count_lines: {e}")
         return {
             "filename": file.filename if file else "unknown",
             "error": str(e),
             "status": "failed"
         }
 
+@app.post("/test_clean")
+async def test_clean(file: UploadFile = File(...)):
+    """Probar solo la limpieza del archivo"""
+    try:
+        content = await file.read()
+        text = content.decode('utf-8', errors='ignore')
+        
+        print(f"DEBUG: Texto original: {len(text)} caracteres")
+        
+        # Aplicar limpieza
+        cleaned = limpiar_log_irclog_avanzado(text)
+        lines = cleaned.split('\n')
+        
+        print(f"DEBUG: Después de limpiar: {len(cleaned)} caracteres, {len(lines)} líneas")
+        
+        # Buscar líneas con "la buena:" después de limpiar
+        buena_lines = []
+        for i, line in enumerate(lines):
+            if 'la buena:' in line.lower() or 'las buenas:' in line.lower():
+                buena_lines.append({
+                    "line_number": i,
+                    "content": line[:200]
+                })
+        
+        return {
+            "filename": file.filename,
+            "original_length": len(text),
+            "cleaned_length": len(cleaned),
+            "total_lines": len(lines),
+            "buena_lines_found": len(buena_lines),
+            "buena_samples": buena_lines[:5],
+            "cleaning_success": len(buena_lines) > 0
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/process_file_direct")
 async def process_file_direct(file: UploadFile = File(...)):
-    """Procesa archivo directamente sin pasar por ChatGPT"""
+    """Procesa archivo directamente"""
     try:
         print(f"DEBUG: Iniciando process_file_direct para {file.filename}")
         
-        # Leer contenido
         content = await file.read()
         text_content = content.decode('utf-8', errors='ignore')
         print(f"DEBUG: Archivo {file.filename}, {len(text_content)} caracteres")
         
-        # PASO 1: Limpiar
+        # Limpiar
         cleaned = limpiar_log_irclog_avanzado(text_content)
         lines = cleaned.split('\n')
         print(f"DEBUG: Después de limpiar: {len(lines)} líneas")
         
-        # PASO 2: Buscar líneas con "buena" manualmente
+        # Buscar líneas con respuestas
         buena_count = 0
         for line in lines:
             if 'la buena:' in line.lower() or 'las buenas:' in line.lower():
@@ -259,7 +291,7 @@ async def process_file_direct(file: UploadFile = File(...)):
         
         print(f"DEBUG: Encontradas {buena_count} líneas con respuestas")
         
-        # PASO 3: Procesar bloques solo si hay preguntas
+        # Procesar bloques si hay preguntas
         if buena_count > 0:
             result = build_blocks_safe(cleaned)
             result["filename"] = file.filename
@@ -282,15 +314,13 @@ async def process_file_direct(file: UploadFile = File(...)):
                 }
             }
         
-        # Liberar memoria
         del content, text_content, cleaned, lines
         gc.collect()
         
-        print(f"DEBUG: Proceso completado")
         return result
         
     except Exception as e:
-        print(f"ERROR CRÍTICO en process_file_direct: {str(e)}")
+        print(f"ERROR en process_file_direct: {str(e)}")
         return {
             "filename": file.filename if file else "unknown",
             "total_questions": 0,
@@ -369,10 +399,7 @@ async def test_sample():
     sample = """23:02:07'921 <Saga_Noren> 2,0 La buena: 0,4 AMENA2,0 Mandada por: ADRASTEA
 23:02:35'697 <Saga_Noren> 2,0 Las buenas: 0,4 VIRTUAL PRIVATE NETWORK, RED PRIVADA VIRTUAL2,0 Mandada por: CORT"""
     
-    # Limpiar
     cleaned = limpiar_log_irclog_avanzado(sample)
-    
-    # Detectar preguntas
     lines = cleaned.split('\n')
     questions = detect_question_indices_simple(lines)
     
@@ -385,4 +412,3 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
