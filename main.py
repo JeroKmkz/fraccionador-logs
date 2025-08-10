@@ -1,3 +1,4 @@
+from fastapi import Request
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,5 +125,19 @@ async def process_text(text: str = Body(..., embed=True)):
     """
     Envía el contenido del log como texto (JSON) y devuelve el troceo.
     """
+    data = build_blocks(text)
+    return JSONResponse(data)
+
+@app.post("/process_text_plain")
+async def process_text_plain(request: Request):
+    """
+    Recibe el contenido del log como texto plano (text/plain) y devuelve el troceo.
+    Evita problemas de JSON con caracteres de control.
+    """
+    raw_bytes = await request.body()
+    try:
+        text = raw_bytes.decode("utf-8", errors="ignore")
+    except Exception:
+        text = str(raw_bytes, "utf-8", errors="ignore")
     data = build_blocks(text)
     return JSONResponse(data)
