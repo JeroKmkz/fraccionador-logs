@@ -70,7 +70,10 @@ def build_blocks(raw: str):
     return {"total_questions": N, "blocks": blocks}
 
 @app.post("/process")
-async def process(file: UploadFile = File(...)):
-    raw = load_text_from_upload(file)
-    data = build_blocks(raw)
+from fastapi import Body
+
+@app.post("/process_text")
+async def process_text(text: str = Body(..., embed=True)):
+    # Reutilizamos build_blocks pero con texto directo
+    data = build_blocks(text)
     return JSONResponse(data)
