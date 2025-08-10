@@ -335,6 +335,54 @@ async def process_text_plain(request: Request):
         print(f"ERROR: {str(e)}")
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
+@app.post("/process_file_direct")
+async def process_file_direct(file: UploadFile = File(...)):
+    """Procesa archivo directamente sin pasar por ChatGPT"""
+    try:
+        # Leer contenido del archivo
+        content = await file.read()
+        text_content = content.decode('utf-8', errors='ignore')
+        
+        print(f"DEBUG: Archivo {file.filename}, {len(text_content)} caracteres")
+        
+        # PASO 1: Limpiar
+        cleaned = limpiar_log_irclog_avanzado(text_content)
+        lines = cleaned.split('\n')
+        buena_lines = [i for i, line in enumerate(lines) if 'La buena:' in line.lower() or 'Las buenas:' in line.lower()]
+        
+        print(f"DEBUG: Limpieza: {len(lines)} líneas, {len(buena_lines)} preguntas")
+        
+        # PASO 2: Procesar bloques
+        if len(buena_lines) > 0:
+            result = build_blocks(cleaned)
+            result["filename"] = file.filename
+            
+            # Añadir información de limpieza
+            result["cleaning_info"] = {
+                "original_length": len(text_content),
+                "cleaned_length": len(cleaned),
+                "questions_found": len(buena_lines)
+            }
+            
+            return result
+        else:
+            return {
+                "filename": file.filename,
+                "total_questions": 0,
+                "total_lines": len(lines),
+                "blocks": [],
+                "error": "No se encontraron preguntas en el archivo",
+                "cleaning_info": {
+                    "original_length": len(text_content),
+                    "cleaned_length": len(cleaned),
+                    "questions_found": 0
+                }
+            }
+        
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        raise HTTPException(500, f"Error procesando archivo: {str(e)}")
+
 @app.get("/")
 async def root():
     return {"message": "Trivial IRC Log Processor API v2.0", "status": "running"}
@@ -365,4 +413,5 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
