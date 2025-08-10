@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import re
 from typing import List, Dict, Any
@@ -142,6 +142,24 @@ async def process_file(file: UploadFile = File(...)):
     
     except Exception as e:
         raise HTTPException(500, f"Error procesando archivo: {str(e)}")
+
+@app.post("/process_text_plain")
+async def process_text_plain(request: Request):
+    """Procesa texto plano directamente desde el body"""
+    try:
+        # Leer el contenido raw del body
+        body = await request.body()
+        text_content = body.decode('utf-8', errors='ignore')
+        
+        if not text_content.strip():
+            raise HTTPException(400, "Contenido vacío")
+            
+        result = build_blocks(text_content)
+        result["filename"] = "log_desde_texto.txt"
+        return result
+    
+    except Exception as e:
+        raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
 @app.get("/")
 async def root():
