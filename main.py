@@ -204,6 +204,52 @@ async def process_text_plain(request: Request):
         print(f"ERROR: {str(e)}")
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
+@app.post("/process_chatgpt")
+async def process_chatgpt(request: Request):
+    """Endpoint específico para ChatGPT con manejo robusto de caracteres"""
+    try:
+        # Leer el contenido raw del body
+        body = await request.body()
+        
+        # Intentar decodificar con máxima tolerancia
+        try:
+            text_content = body.decode('utf-8')
+        except UnicodeDecodeError:
+            text_content = body.decode('utf-8', errors='replace')
+        
+        # Limpiar caracteres problemáticos agresivamente
+        text_content = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', text_content)  # Remover controles
+        text_content = re.sub(r'\\u[0-9a-fA-F]{4}', ' ', text_content)      # Remover secuencias unicode
+        text_content = re.sub(r'\s+', ' ', text_content)                    # Normalizar espacios
+        
+        if not text_content.strip():
+            return {
+                "filename": "error.txt",
+                "total_questions": 0,
+                "total_lines": 0,
+                "blocks": [],
+                "error": "Contenido vacío después de limpieza"
+            }
+        
+        print(f"DEBUG ChatGPT: Procesando {len(text_content)} caracteres")
+        
+        result = build_blocks(text_content)
+        result["filename"] = "log_chatgpt.txt"
+        
+        print(f"DEBUG ChatGPT: Detectadas {result['total_questions']} preguntas")
+        
+        return result
+    
+    except Exception as e:
+        print(f"ERROR ChatGPT: {str(e)}")
+        return {
+            "filename": "error.txt",
+            "total_questions": 0,
+            "total_lines": 0,
+            "blocks": [],
+            "error": str(e)
+        }
+
 @app.get("/")
 async def root():
     return {"message": "Trivial IRC Log Processor API", "status": "running"}
@@ -229,4 +275,5 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
