@@ -63,8 +63,11 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
             match = re.search(pattern, clean_line, re.IGNORECASE)
             if match:
                 answer = match.group(1).strip()
-                # Limpiar respuesta final
-                answer = re.sub(r'\s+', ' ', answer).strip()
+                
+                # Limpiar respuesta final más agresivamente
+                answer = re.sub(r'\d+,\d+', '', answer)  # Remover códigos de color residuales
+                answer = re.sub(r'\s+', ' ', answer).strip()  # Normalizar espacios
+                
                 print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
                 questions.append({
                     'idx': len(questions) + 1,
@@ -226,3 +229,4 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
