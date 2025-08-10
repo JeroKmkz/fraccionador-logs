@@ -31,22 +31,38 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
     questions = []
     
     for i, line in enumerate(lines):
+        # Debugging específico
+        if 'La buena:' in line or 'Las buenas:' in line:
+            print(f"DEBUG: Línea {i}: {repr(line[:100])}")
+        
         clean_line = strip_for_detection(line)
         
-        # Regex mejorado para detectar respuestas con más variaciones
-        match = re.search(r'Las?\s+buena?s?\s*[:\-]\s*(.+?)\s*Mandada por:', 
-                         clean_line, re.IGNORECASE)
+        # Debug de línea limpia
+        if 'La buena' in clean_line:
+            print(f"DEBUG: Línea limpia {i}: {repr(clean_line[:100])}")
         
-        if match:
-            answer = match.group(1).strip()
-            # Limpiar códigos de color residuales de la respuesta
-            answer = re.sub(r'\d+,\d+', '', answer).strip()
-            questions.append({
-                'idx': len(questions) + 1,
-                'line_index': i,
-                'answer': answer
-            })
+        # Regex más flexible
+        patterns = [
+            r'Las?\s+buena?s?\s*[:\-]\s*(.+?)\s*Mandada por:',
+            r'La\s+buena\s*:\s*(.+?)\s*Mandada por:',
+            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada por:'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, clean_line, re.IGNORECASE)
+            if match:
+                answer = match.group(1).strip()
+                # Limpiar respuesta
+                answer = re.sub(r'\s+', ' ', answer).strip()
+                print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
+                questions.append({
+                    'idx': len(questions) + 1,
+                    'line_index': i,
+                    'answer': answer
+                })
+                break
     
+    print(f"DEBUG: Total preguntas detectadas: {len(questions)}")
     return questions
 
 def build_blocks(raw_text: str) -> Dict[str, Any]:
@@ -155,16 +171,34 @@ async def process_text_plain(request: Request):
     try:
         # Leer el contenido raw del body
         body = await request.body()
-        text_content = body.decode('utf-8', errors='ignore')
+        
+        # Intentar diferentes codificaciones
+        try:
+            text_content = body.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                text_content = body.decode('latin-1')
+            except:
+                text_content = body.decode('utf-8', errors='ignore')
         
         if not text_content.strip():
             raise HTTPException(400, "Contenido vacío")
+        
+        # Debug: mostrar primeras líneas para verificar contenido
+        lines_preview = text_content.split('\n')[:5]
+        print(f"DEBUG: Recibidas {len(text_content.split(chr(10)))} líneas")
+        print(f"DEBUG: Primeras líneas: {lines_preview}")
             
         result = build_blocks(text_content)
         result["filename"] = "log_desde_texto.txt"
+        
+        # Debug: mostrar resultado
+        print(f"DEBUG: Detectadas {result['total_questions']} preguntas")
+        
         return result
     
     except Exception as e:
+        print(f"ERROR: {str(e)}")
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
 @app.get("/")
@@ -177,3 +211,4 @@ async def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
