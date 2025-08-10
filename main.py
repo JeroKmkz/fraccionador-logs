@@ -17,10 +17,14 @@ app.add_middleware(
 
 def strip_for_detection(text: str) -> str:
     """Limpia códigos IRC solo para detección, NO para retorno"""
-    # Remover códigos de color y control IRC
+    # Remover códigos de color y control IRC más agresivamente
     clean = re.sub(r'[\x02\x03\x0f\x16\x1d\x1f]', '', text)
     clean = re.sub(r'\x03\d{1,2}(,\d{1,2})?', '', clean)
-    return clean
+    # Remover patrones de color específicos como "2,0" "0,4" etc.
+    clean = re.sub(r'\d+,\d+', ' ', clean)
+    # Limpiar espacios múltiples
+    clean = re.sub(r'\s+', ' ', clean)
+    return clean.strip()
 
 def detect_question_indices(lines: List[str]) -> List[Dict]:
     """Detecta índices de preguntas por líneas con 'La(s) buena(s)'"""
@@ -29,12 +33,14 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
     for i, line in enumerate(lines):
         clean_line = strip_for_detection(line)
         
-        # Regex para detectar respuestas
-        match = re.search(r'Las?\s+buena?s?\s*[:\-]\s*(.*?)\s*Mandada por:', 
+        # Regex mejorado para detectar respuestas con más variaciones
+        match = re.search(r'Las?\s+buena?s?\s*[:\-]\s*(.+?)\s*Mandada por:', 
                          clean_line, re.IGNORECASE)
         
         if match:
             answer = match.group(1).strip()
+            # Limpiar códigos de color residuales de la respuesta
+            answer = re.sub(r'\d+,\d+', '', answer).strip()
             questions.append({
                 'idx': len(questions) + 1,
                 'line_index': i,
