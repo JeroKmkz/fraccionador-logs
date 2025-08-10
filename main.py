@@ -18,83 +18,45 @@ app.add_middleware(
 
 def limpiar_log_irclog_avanzado(text: str) -> str:
     """
-    Limpiador avanzado basado en IRCLogCleaner
-    Elimina códigos de color, formato y caracteres especiales de IRC
+    Limpiador avanzado que maneja códigos IRC en formato \uXXXX
     """
     import re
     
-    # Patrones basados en el código del usuario
+    # PRIMERO: Convertir códigos unicode escapados a caracteres reales
+    try:
+        text = text.encode().decode('unicode_escape')
+    except:
+        pass
+    
+    # Patrones de limpieza
     patterns = {
-        # Códigos de color (\x03 seguido de 1-2 dígitos, opcionalmente coma y 1-2 dígitos más)
+        # Códigos de color (\x03 seguido de dígitos)
         'color': re.compile(r'\x03\d{1,2}(?:,\d{1,2})?'),
-        
-        # Negrita (\x02)
         'bold': re.compile(r'\x02'),
-        
-        # Cursiva (\x1D)
         'italic': re.compile(r'\x1D'),
-        
-        # Subrayado (\x1F)
         'underline': re.compile(r'\x1F'),
-        
-        # Reset de formato (\x0F)
         'reset': re.compile(r'\x0F'),
-        
-        # Carácter de borrado (\x7F)
         'delete': re.compile(r'\x7F'),
         
-        # Códigos de color alternativos (como 2,9 o 11,1)
+        # Códigos de color tipo "2,0" sueltos
         'color_coords': re.compile(r'\b\d{1,2},\d{1,2}\b'),
         
-        # Secuencias de escape ANSI
+        # Secuencias ANSI
         'ansi': re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'),
         
         # Múltiples espacios
         'multiple_spaces': re.compile(r'\s{2,}'),
-        
-        # Casos específicos para limpiar caracteres residuales al inicio
-        'inicio_residual': re.compile(r'^[:\?]\s*'),
-        
-        # Patrones adicionales para códigos unicode que envía ChatGPT
-        'unicode_controls': re.compile(r'\\u[0-9a-fA-F]{4}'),
-        'escaped_controls': re.compile(r'\\x[0-9a-fA-F]{2}'),
     }
     
-    # Limpiar línea por línea
-    lines = text.split('\n')
-    cleaned_lines = []
+    # Aplicar limpieza
+    cleaned = text
+    for pattern_name, pattern in patterns.items():
+        cleaned = pattern.sub('', cleaned)
     
-    for line in lines:
-        if not isinstance(line, str):
-            cleaned_lines.append("")
-            continue
-            
-        try:
-            cleaned = line
-            
-            # Aplicar todos los patrones de limpieza
-            cleaned = patterns['color'].sub('', cleaned)
-            cleaned = patterns['bold'].sub('', cleaned)
-            cleaned = patterns['italic'].sub('', cleaned)
-            cleaned = patterns['underline'].sub('', cleaned)
-            cleaned = patterns['reset'].sub('', cleaned)
-            cleaned = patterns['delete'].sub('', cleaned)
-            cleaned = patterns['ansi'].sub('', cleaned)
-            cleaned = patterns['color_coords'].sub('', cleaned)
-            cleaned = patterns['unicode_controls'].sub('', cleaned)
-            cleaned = patterns['escaped_controls'].sub('', cleaned)
-            cleaned = patterns['multiple_spaces'].sub(' ', cleaned)
-            cleaned = patterns['inicio_residual'].sub('', cleaned)
-            
-            # Limpiar espacios al inicio y final
-            cleaned = cleaned.strip()
-            cleaned_lines.append(cleaned)
-            
-        except Exception as e:
-            print(f"Error limpiando línea: {e}")
-            cleaned_lines.append(line.strip())
+    # Limpiar espacios múltiples y normalizar
+    cleaned = re.sub(r'\s+', ' ', cleaned)
     
-    return '\n'.join(cleaned_lines)
+    return cleaned
 
 def detect_question_indices_simple(lines: List[str]) -> List[Dict]:
     """Detección súper simple de preguntas"""
@@ -423,3 +385,4 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
