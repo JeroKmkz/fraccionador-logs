@@ -100,19 +100,20 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
     questions = []
     
     for i, line in enumerate(lines):
-        # La línea ya debería estar limpia cuando llega aquí
-        clean_line = line
+        clean_line = line.lower().strip()
         
-        # Debug: mostrar líneas que contengan "buena"
-        if 'buena' in clean_line.lower():
-            print(f"DEBUG línea {i}: {repr(clean_line[:100])}")
+        # Debug: mostrar todas las líneas que contengan "buena"
+        if 'buena' in clean_line:
+            print(f"DEBUG línea {i}: {repr(line[:150])}")
         
-        # Patrones múltiples para detectar respuestas
+        # Patrones más permisivos para detectar respuestas
         patterns = [
-            r'La\s+buena\s*:\s*(.+?)\s*Mandada\s+por:',
-            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada\s+por:',
-            r'La\s+buena\s*:\s*(.+?)\s*Mandada\s+por',
-            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada\s+por'
+            r'la\s+buena\s*[:\-]\s*(.+?)\s*mandada\s+por\s*[:\-]?',
+            r'las\s+buenas\s*[:\-]\s*(.+?)\s*mandada\s+por\s*[:\-]?',
+            r'la\s+buena\s*[:\-]\s*(.+?)\s*mandada\s+por',
+            r'las\s+buenas\s*[:\-]\s*(.+?)\s*mandada\s+por',
+            r'la\s+buena\s*[:\-]\s*(.+?)$',  # Si no hay "Mandada por"
+            r'las\s+buenas\s*[:\-]\s*(.+?)$'  # Si no hay "Mandada por"
         ]
         
         for pattern in patterns:
@@ -120,17 +121,18 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
             if match:
                 answer = match.group(1).strip()
                 
-                # Limpiar respuesta final más agresivamente
-                answer = re.sub(r'\d+,\d+', '', answer)  # Remover códigos de color residuales
-                answer = re.sub(r'\s+', ' ', answer).strip()  # Normalizar espacios
+                # Limpiar respuesta
+                answer = re.sub(r'\s+', ' ', answer).strip()
                 
-                print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
-                questions.append({
-                    'idx': len(questions) + 1,
-                    'line_index': i,
-                    'answer': answer
-                })
-                break
+                # Solo añadir si no está vacía
+                if answer:
+                    print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
+                    questions.append({
+                        'idx': len(questions) + 1,
+                        'line_index': i,
+                        'answer': answer
+                    })
+                    break
     
     print(f"DEBUG: Total preguntas detectadas: {len(questions)}")
     return questions
@@ -223,6 +225,37 @@ async def load_text_from_upload(upload: UploadFile) -> str:
         return content.decode('utf-8', errors='ignore')
     except Exception as e:
         raise HTTPException(400, f"Error decodificando archivo: {str(e)}")
+
+@app.post("/debug_lines")
+async def debug_lines(file: UploadFile = File(...)):
+    """Debug: ver líneas que contienen 'buena'"""
+    try:
+        content = await file.read()
+        text_content = content.decode('utf-8', errors='ignore')
+        
+        # Limpiar
+        cleaned = limpiar_log_irclog_avanzado(text_content)
+        lines = cleaned.split('\n')
+        
+        # Buscar líneas con "buena"
+        buena_lines = []
+        for i, line in enumerate(lines):
+            if 'buena' in line.lower():
+                buena_lines.append({
+                    "line_number": i,
+                    "content": line,
+                    "length": len(line)
+                })
+        
+        return {
+            "filename": file.filename,
+            "total_lines": len(lines),
+            "lines_with_buena": buena_lines[:10],  # Primeras 10
+            "total_buena_lines": len(buena_lines)
+        }
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error: {str(e)}")
 
 @app.post("/clean_log")
 async def clean_log(request: Request):
@@ -413,5 +446,6 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
