@@ -328,6 +328,54 @@ async def clean_log(request: Request):
             "cleaned_text": "",
             "question_lines_found": 0
         }
+@app.post("/debug_cleaning")
+async def debug_cleaning(file: UploadFile = File(...)):
+    """Debug: ver exactamente qué pasa con la limpieza"""
+    try:
+        content = await file.read()
+        text_content = content.decode('utf-8', errors='ignore')
+        
+        # Buscar líneas con "buena" ANTES de limpiar
+        lines_before = text_content.split('\n')
+        buena_before = []
+        for i, line in enumerate(lines_before):
+            if 'buena' in line.lower():
+                buena_before.append({
+                    "line_number": i,
+                    "content": line[:200],  # Primeros 200 chars
+                    "contains_la_buena": 'la buena:' in line.lower(),
+                    "contains_las_buenas": 'las buenas:' in line.lower()
+                })
+        
+        # Limpiar
+        cleaned = limpiar_log_irclog_avanzado(text_content)
+        
+        # Buscar líneas con "buena" DESPUÉS de limpiar
+        lines_after = cleaned.split('\n')
+        buena_after = []
+        for i, line in enumerate(lines_after):
+            if 'buena' in line.lower():
+                buena_after.append({
+                    "line_number": i,
+                    "content": line[:200],
+                    "contains_la_buena": 'la buena:' in line.lower(),
+                    "contains_las_buenas": 'las buenas:' in line.lower()
+                })
+        
+        return {
+            "filename": file.filename,
+            "original_length": len(text_content),
+            "cleaned_length": len(cleaned),
+            "lines_before_cleaning": len(lines_before),
+            "lines_after_cleaning": len(lines_after),
+            "buena_lines_before": buena_before[:5],  # Primeras 5
+            "buena_lines_after": buena_after[:5],   # Primeras 5
+            "total_buena_before": len(buena_before),
+            "total_buena_after": len(buena_after)
+        }
+        
+    except Exception as e:
+        raise HTTPException(500, f"Error: {str(e)}")
 
 @app.post("/process")
 async def process_file(file: UploadFile = File(...)):
@@ -443,6 +491,7 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
