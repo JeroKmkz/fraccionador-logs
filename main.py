@@ -250,6 +250,30 @@ async def process_chatgpt(request: Request):
             "error": str(e)
         }
 
+@app.post("/debug_received")
+async def debug_received(request: Request):
+    """Debug: mostrar exactamente qué recibimos de ChatGPT"""
+    try:
+        body = await request.body()
+        text = body.decode('utf-8', errors='replace')
+        
+        return {
+            "total_bytes": len(body),
+            "total_chars": len(text),
+            "total_lines": len(text.split('\n')),
+            "first_200_chars": text[:200],
+            "last_200_chars": text[-200:] if len(text) > 200 else text,
+            "contains_saga_noren": "Saga_Noren" in text,
+            "contains_buena": "buena" in text.lower(),
+            "line_count_breakdown": {
+                "total": len(text.split('\n')),
+                "non_empty": len([l for l in text.split('\n') if l.strip()]),
+                "with_saga": len([l for l in text.split('\n') if 'Saga_Noren' in l])
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/")
 async def root():
     return {"message": "Trivial IRC Log Processor API", "status": "running"}
@@ -275,5 +299,6 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
