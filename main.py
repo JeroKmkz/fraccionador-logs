@@ -100,39 +100,36 @@ def detect_question_indices(lines: List[str]) -> List[Dict]:
     questions = []
     
     for i, line in enumerate(lines):
-        clean_line = line.lower().strip()
+        # Buscar simplemente "La buena:" o "Las buenas:"
+        line_lower = line.lower()
         
-        # Debug: mostrar todas las líneas que contengan "buena"
-        if 'buena' in clean_line:
-            print(f"DEBUG línea {i}: {repr(line[:150])}")
-        
-        # Patrones más permisivos para detectar respuestas
-        patterns = [
-            r'la\s+buena\s*[:\-]\s*(.+?)\s*mandada\s+por\s*[:\-]?',
-            r'las\s+buenas\s*[:\-]\s*(.+?)\s*mandada\s+por\s*[:\-]?',
-            r'la\s+buena\s*[:\-]\s*(.+?)\s*mandada\s+por',
-            r'las\s+buenas\s*[:\-]\s*(.+?)\s*mandada\s+por',
-            r'la\s+buena\s*[:\-]\s*(.+?)$',  # Si no hay "Mandada por"
-            r'las\s+buenas\s*[:\-]\s*(.+?)$'  # Si no hay "Mandada por"
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, clean_line, re.IGNORECASE)
-            if match:
-                answer = match.group(1).strip()
-                
-                # Limpiar respuesta
-                answer = re.sub(r'\s+', ' ', answer).strip()
-                
-                # Solo añadir si no está vacía
-                if answer:
-                    print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
-                    questions.append({
-                        'idx': len(questions) + 1,
-                        'line_index': i,
-                        'answer': answer
-                    })
-                    break
+        if 'la buena:' in line_lower or 'las buenas:' in line_lower:
+            print(f"DEBUG línea {i}: {repr(line[:100])}")
+            
+            # Extraer respuesta de forma simple
+            if 'la buena:' in line_lower:
+                start = line_lower.find('la buena:') + 9  # len("la buena:")
+            else:
+                start = line_lower.find('las buenas:') + 11  # len("las buenas:")
+            
+            # Buscar hasta "mandada por" o final de línea
+            end_pos = line_lower.find('mandada por', start)
+            if end_pos == -1:
+                answer_part = line[start:].strip()
+            else:
+                answer_part = line[start:end_pos].strip()
+            
+            # Limpiar respuesta de códigos residuales
+            answer = re.sub(r'\d+,\d+', '', answer_part)  # Quitar códigos como "2,0"
+            answer = re.sub(r'\s+', ' ', answer).strip()
+            
+            if answer:
+                print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
+                questions.append({
+                    'idx': len(questions) + 1,
+                    'line_index': i,
+                    'answer': answer
+                })
     
     print(f"DEBUG: Total preguntas detectadas: {len(questions)}")
     return questions
@@ -446,6 +443,7 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 
 
