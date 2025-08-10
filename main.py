@@ -201,6 +201,37 @@ async def process_text_plain(request: Request):
         print(f"ERROR: {str(e)}")
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
+@app.post("/debug_log")
+async def debug_log(log_content: str):
+    """Debug endpoint para probar detección de preguntas"""
+    try:
+        # Procesar el contenido
+        lines = log_content.split('\n')
+        
+        # Buscar líneas con "La buena" o "Las buenas"
+        buena_lines = []
+        for i, line in enumerate(lines):
+            if 'La buena:' in line or 'Las buenas:' in line:
+                buena_lines.append({
+                    "line_number": i,
+                    "content": line,
+                    "clean_content": strip_for_detection(line)
+                })
+        
+        # Intentar detectar preguntas
+        questions = detect_question_indices(lines)
+        
+        return {
+            "total_lines": len(lines),
+            "lines_with_buena": buena_lines,
+            "detected_questions": len(questions),
+            "questions": questions,
+            "sample_lines": lines[:5]
+        }
+        
+    except Exception as e:
+        return {"error": str(e), "details": "Error procesando el log"}
+
 @app.get("/")
 async def root():
     return {"message": "Trivial IRC Log Processor API", "status": "running"}
@@ -211,4 +242,5 @@ async def health():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
