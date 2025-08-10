@@ -15,44 +15,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def strip_for_detection(text: str) -> str:
-    """Limpia códigos IRC solo para detección, NO para retorno"""
-    # Remover códigos de color y control IRC más agresivamente
-    clean = re.sub(r'[\x02\x03\x0f\x16\x1d\x1f]', '', text)
-    clean = re.sub(r'\x03\d{1,2}(,\d{1,2})?', '', clean)
-    # Remover patrones de color específicos como "2,0" "0,4" etc.
-    clean = re.sub(r'\d+,\d+', ' ', clean)
-    # Limpiar espacios múltiples
-    clean = re.sub(r'\s+', ' ', clean)
-    return clean.strip()
+def limpiar_log_irclog(text: str) -> str:
+    """
+    Limpia códigos IRC del texto completo
+    Basado en el limpiador proporcionado
+    """
+    # Patrones IRC molestos (tanto formato \x como \u0003)
+    bold_pattern = re.compile(r"[\x02\u0002]")                    # Negrita
+    color_pattern = re.compile(r"[\x03\u0003]\d{0,2}(,\d{0,2})?")  # Colores IRC
+    reset_pattern = re.compile(r"[\x0f\u000f]")                   # Reset de formato
+    delete_pattern = re.compile(r"[\x7f\u007f]")                  # Delete
+    other_controls = re.compile(r"[\x16\x1d\x1f\u0016\u001d\u001f]")  # Otros controles
+    coordinates_pattern = re.compile(r"\b\d{1,2},\d{1,2}\b")      # Coordenadas tipo "12,15"
+
+    # Aplicar limpieza
+    text = bold_pattern.sub("", text)
+    text = color_pattern.sub("", text)
+    text = reset_pattern.sub("", text)
+    text = delete_pattern.sub("", text)
+    text = other_controls.sub("", text)
+    text = coordinates_pattern.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text)  # Reduce espacios múltiples
+    
+    return text
 
 def detect_question_indices(lines: List[str]) -> List[Dict]:
     """Detecta índices de preguntas por líneas con 'La(s) buena(s)'"""
     questions = []
     
     for i, line in enumerate(lines):
-        # Debugging específico
-        if 'La buena:' in line or 'Las buenas:' in line:
-            print(f"DEBUG: Línea {i}: {repr(line[:100])}")
+        # Limpiar la línea para detección
+        clean_line = limpiar_log_irclog(line)
         
-        clean_line = strip_for_detection(line)
+        # Debug: mostrar líneas que contengan "buena"
+        if 'buena' in clean_line.lower():
+            print(f"DEBUG línea {i}: {repr(clean_line[:100])}")
         
-        # Debug de línea limpia
-        if 'La buena' in clean_line:
-            print(f"DEBUG: Línea limpia {i}: {repr(clean_line[:100])}")
-        
-        # Regex más flexible
+        # Patrones múltiples para detectar respuestas
         patterns = [
-            r'Las?\s+buena?s?\s*[:\-]\s*(.+?)\s*Mandada por:',
-            r'La\s+buena\s*:\s*(.+?)\s*Mandada por:',
-            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada por:'
+            r'La\s+buena\s*:\s*(.+?)\s*Mandada\s+por:',
+            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada\s+por:',
+            r'La\s+buena\s*:\s*(.+?)\s*Mandada\s+por',
+            r'Las\s+buenas\s*:\s*(.+?)\s*Mandada\s+por'
         ]
         
         for pattern in patterns:
             match = re.search(pattern, clean_line, re.IGNORECASE)
             if match:
                 answer = match.group(1).strip()
-                # Limpiar respuesta
+                # Limpiar respuesta final
                 answer = re.sub(r'\s+', ' ', answer).strip()
                 print(f"DEBUG: Respuesta encontrada: {repr(answer)}")
                 questions.append({
@@ -75,7 +86,8 @@ def build_blocks(raw_text: str) -> Dict[str, Any]:
             "filename": "",
             "total_questions": 0,
             "total_lines": len(lines),
-            "blocks": []
+            "blocks": [],
+            "debug_info": f"Procesadas {len(lines)} líneas, no se encontraron respuestas"
         }
     
     # Dividir en máximo 5 bloques equilibrados
@@ -113,7 +125,7 @@ def build_blocks(raw_text: str) -> Dict[str, Any]:
                 "answer": question['answer'],
                 "line_range": [q_start_line, q_end_line],
                 "text_raw": question_text,
-                "text_clean": strip_for_detection(question_text)
+                "text_clean": limpiar_log_irclog(question_text)
             })
         
         # Texto completo del bloque
@@ -126,7 +138,7 @@ def build_blocks(raw_text: str) -> Dict[str, Any]:
             "line_range": [start_line, end_line],
             "questions": block_questions,
             "text_raw": block_text,
-            "text_clean": strip_for_detection(block_text)
+            "text_clean": limpiar_log_irclog(block_text)
         })
         
         # Preparar para siguiente bloque
@@ -171,66 +183,23 @@ async def process_text_plain(request: Request):
     try:
         # Leer el contenido raw del body
         body = await request.body()
-        
-        # Intentar diferentes codificaciones
-        try:
-            text_content = body.decode('utf-8')
-        except UnicodeDecodeError:
-            try:
-                text_content = body.decode('latin-1')
-            except:
-                text_content = body.decode('utf-8', errors='ignore')
+        text_content = body.decode('utf-8', errors='ignore')
         
         if not text_content.strip():
             raise HTTPException(400, "Contenido vacío")
         
-        # Debug: mostrar primeras líneas para verificar contenido
-        lines_preview = text_content.split('\n')[:5]
         print(f"DEBUG: Recibidas {len(text_content.split(chr(10)))} líneas")
-        print(f"DEBUG: Primeras líneas: {lines_preview}")
-            
+        
         result = build_blocks(text_content)
         result["filename"] = "log_desde_texto.txt"
         
-        # Debug: mostrar resultado
-        print(f"DEBUG: Detectadas {result['total_questions']} preguntas")
+        print(f"DEBUG: Resultado: {result['total_questions']} preguntas")
         
         return result
     
     except Exception as e:
         print(f"ERROR: {str(e)}")
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
-
-@app.post("/debug_log")
-async def debug_log(log_content: str):
-    """Debug endpoint para probar detección de preguntas"""
-    try:
-        # Procesar el contenido
-        lines = log_content.split('\n')
-        
-        # Buscar líneas con "La buena" o "Las buenas"
-        buena_lines = []
-        for i, line in enumerate(lines):
-            if 'La buena:' in line or 'Las buenas:' in line:
-                buena_lines.append({
-                    "line_number": i,
-                    "content": line,
-                    "clean_content": strip_for_detection(line)
-                })
-        
-        # Intentar detectar preguntas
-        questions = detect_question_indices(lines)
-        
-        return {
-            "total_lines": len(lines),
-            "lines_with_buena": buena_lines,
-            "detected_questions": len(questions),
-            "questions": questions,
-            "sample_lines": lines[:5]
-        }
-        
-    except Exception as e:
-        return {"error": str(e), "details": "Error procesando el log"}
 
 @app.get("/")
 async def root():
@@ -240,7 +209,20 @@ async def root():
 async def health():
     return {"status": "healthy"}
 
+@app.get("/test_sample")
+async def test_sample():
+    """Test con muestra del log real"""
+    sample = """23:02:07'921 <Saga_Noren> 2,0 La buena: 0,4 AMENA2,0 Mandada por: ADRASTEA
+23:02:35'697 <Saga_Noren> 2,0 Las buenas: 0,4 VIRTUAL PRIVATE NETWORK, RED PRIVADA VIRTUAL2,0 Mandada por: CORT"""
+    
+    lines = sample.split('\n')
+    questions = detect_question_indices(lines)
+    
+    return {
+        "sample_lines": lines,
+        "detected_questions": questions,
+        "cleaned_lines": [limpiar_log_irclog(line) for line in lines]
+    }
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
