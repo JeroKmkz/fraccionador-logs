@@ -1,13 +1,13 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import re
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uvicorn
 import gc
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="3.0.0")
+app = FastAPI(title="Trivial IRC Log Processor", version="3.1.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -28,29 +28,29 @@ def limpiar_log_irclog_avanzado(text: str) -> str:
     
     # PASO 2: Patrones de limpieza IRC
     patterns = {
-        'color': re.compile(r'\x03\d{0,2}(?:,\d{1,2})?'),
-        'bold': re.compile(r'\x02'),
-        'italic': re.compile(r'\x1D'),
-        'underline': re.compile(r'\x1F'),
-        'reset': re.compile(r'\x0F'),
-        'delete': re.compile(r'\x7F'),
-        'color_coords': re.compile(r'\b\d{1,2},\d{1,2}\b'),
-        'controls': re.compile(r'[\x00-\x08\x0B-\x0C\x0E-\x1F]'),
-        'spaces': re.compile(r'\s{2,}'),
+        'color': re.compile(r'\\x03\\d{0,2}(?:,\\d{1,2})?'),
+        'bold': re.compile(r'\\x02'),
+        'italic': re.compile(r'\\x1D'),
+        'underline': re.compile(r'\\x1F'),
+        'reset': re.compile(r'\\x0F'),
+        'delete': re.compile(r'\\x7F'),
+        'color_coords': re.compile(r'\\b\\d{1,2},\\d{1,2}\\b'),
+        'controls': re.compile(r'[\\x00-\\x08\\x0B-\\x0C\\x0E-\\x1F]'),
+        'spaces': re.compile(r'\\s{2,}'),
     }
     
     # PASO 3: Aplicar limpieza línea por línea
-    lines = text.split('\n')
+    lines = text.split('\\n')
     cleaned_lines = []
     
     for line in lines:
         cleaned = line
         for pattern in patterns.values():
             cleaned = pattern.sub(' ', cleaned)
-        cleaned = re.sub(r'\s+', ' ', cleaned.strip())
+        cleaned = re.sub(r'\\s+', ' ', cleaned.strip())
         cleaned_lines.append(cleaned)
     
-    return '\n'.join(cleaned_lines)
+    return '\\n'.join(cleaned_lines)
 
 def detect_questions_advanced(lines: List[str]) -> List[Dict]:
     """Detección avanzada de preguntas con más contexto"""
@@ -73,31 +73,44 @@ def detect_questions_advanced(lines: List[str]) -> List[Dict]:
                 answer_text = line[start_pos:end_pos].strip()
             
             # Limpiar respuesta
-            answer_clean = re.sub(r'\d+,\d+', '', answer_text)
-            answer_clean = re.sub(r'\s+', ' ', answer_clean).strip()
+            answer_clean = re.sub(r'\\d+,\\d+', '', answer_text)
+            answer_clean = re.sub(r'\\s+', ' ', answer_clean).strip()
             
             if answer_clean:
                 # Buscar contexto anterior (pregunta)
                 question_context = ""
-                for j in range(max(0, i-10), i):
-                    prev_line = lines[j].lower()
-                    if any(word in prev_line for word in ['pregunta', 'question', '¿', '?']):
-                        question_context = lines[j].strip()
+                question_line = ""
+                for j in range(max(0, i-15), i):
+                    prev_line = lines[j]
+                    prev_line_lower = prev_line.lower()
+                    
+                    # Buscar líneas que contengan preguntas
+                    if any(word in prev_line_lower for word in ['pregunta:', '¿', '?']) and len(prev_line.strip()) > 20:
+                        question_line = prev_line.strip()
+                        # Limpiar la pregunta también
+                        question_context = limpiar_log_irclog_avanzado(question_line)
                         break
                 
                 # Buscar quién mandó la pregunta
                 author = ""
-                mandada_match = re.search(r'mandada por[:\s]+(\w+)', line_lower)
+                mandada_match = re.search(r'mandada por[:\\s]+([^\\s,]+)', line_lower)
                 if mandada_match:
                     author = mandada_match.group(1).upper()
                 
+                # Buscar número de pregunta
+                question_number = len(questions) + 1
+                if question_context:
+                    num_match = re.search(r'pregunta[:\\s]+(\\d+)', question_context.lower())
+                    if num_match:
+                        question_number = int(num_match.group(1))
+                
                 questions.append({
-                    'number': len(questions) + 1,
+                    'number': question_number,
                     'line_index': i,
                     'answer': answer_clean,
-                    'question_context': question_context,
+                    'question_context': question_context[:300] if question_context else "",
                     'author': author,
-                    'raw_line': line
+                    'raw_line': line[:200]
                 })
     
     return questions
@@ -108,16 +121,19 @@ def find_participants(lines: List[str]) -> List[str]:
     
     for line in lines:
         # Buscar nicks después de timestamps
-        match = re.match(r'\d+:\d+:\d+.*?<([^>]+)>', line)
+        match = re.match(r'\\d+:\\d+:\\d+.*?<([^>]+)>', line)
         if match:
             nick = match.group(1)
-            if nick not in ['Saga_Noren', 'Bot', 'Server']:  # Excluir bots/servidor
+            # Excluir bots y servidores comunes
+            if nick not in ['Saga_Noren', 'VegaSicilia', 'Bot', 'Server', 'GleviBot']:
                 participants.add(nick)
         
         # Buscar en "mandada por"
-        mandada_match = re.search(r'mandada por[:\s]+(\w+)', line.lower())
+        mandada_match = re.search(r'mandada por[:\\s]+([^\\s,]+)', line.lower())
         if mandada_match:
-            participants.add(mandada_match.group(1).upper())
+            author = mandada_match.group(1).upper()
+            if author not in ['FIREBALL', 'CASTRO', 'BOT']:
+                participants.add(author)
     
     return sorted(list(participants))
 
@@ -136,7 +152,7 @@ def build_narrative_blocks(questions: List[Dict], participants: List[str], total
     
     # Dividir en bloques de máximo 8 preguntas
     total_questions = len(questions)
-    block_size = min(8, max(1, total_questions // 4))  # Entre 1 y 8 preguntas por bloque
+    block_size = min(8, max(1, total_questions // max(1, total_questions // 8)))
     
     blocks = []
     for i in range(0, total_questions, block_size):
@@ -153,7 +169,7 @@ def build_narrative_blocks(questions: List[Dict], participants: List[str], total
                 "number": q['number'],
                 "answer": q['answer'],
                 "author": q['author'],
-                "context": q['question_context'][:200] if q['question_context'] else "",
+                "context": q['question_context'],
                 "line_index": q['line_index']
             })
         
@@ -179,6 +195,9 @@ async def process_direct(request: Request):
         body = await request.body()
         raw_text = body.decode('utf-8', errors='ignore')
         
+        print(f"DEBUG: Recibido texto de {len(raw_text)} caracteres")
+        print(f"DEBUG: Primeras 200 chars: {raw_text[:200]}")
+        
         if not raw_text.strip():
             return {
                 "status": "error",
@@ -187,13 +206,19 @@ async def process_direct(request: Request):
         
         # PASO 1: Limpiar códigos IRC
         cleaned_text = limpiar_log_irclog_avanzado(raw_text)
-        lines = cleaned_text.split('\n')
+        lines = cleaned_text.split('\\n')
+        
+        print(f"DEBUG: Después de limpiar: {len(lines)} líneas")
         
         # PASO 2: Detectar preguntas
         questions = detect_questions_advanced(lines)
         
+        print(f"DEBUG: Preguntas detectadas: {len(questions)}")
+        
         # PASO 3: Encontrar participantes
         participants = find_participants(lines)
+        
+        print(f"DEBUG: Participantes encontrados: {len(participants)}")
         
         # PASO 4: Construir bloques narrativos
         result = build_narrative_blocks(questions, participants, len(lines))
@@ -209,32 +234,93 @@ async def process_direct(request: Request):
         return result
         
     except Exception as e:
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             "status": "error",
             "error": str(e),
             "debug_info": f"Error procesando log: {str(e)}"
         }
 
+@app.post("/process_file")
+async def process_file(file: UploadFile = File(...)):
+    """Endpoint específico para procesar archivos subidos"""
+    try:
+        print(f"DEBUG: Recibido archivo {file.filename}, tipo: {file.content_type}")
+        
+        # Leer contenido del archivo
+        content = await file.read()
+        
+        print(f"DEBUG: Archivo leído, {len(content)} bytes")
+        
+        # Intentar diferentes encodings
+        raw_text = ""
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                raw_text = content.decode(encoding, errors='ignore')
+                print(f"DEBUG: Decodificado exitosamente con {encoding}")
+                break
+            except:
+                continue
+        
+        if not raw_text.strip():
+            return {
+                "status": "error",
+                "error": f"No se pudo leer el contenido del archivo {file.filename}"
+            }
+        
+        print(f"DEBUG: Texto decodificado: {len(raw_text)} caracteres")
+        print(f"DEBUG: Primeras 200 chars: {raw_text[:200]}")
+        
+        # Procesar con la misma lógica que process_direct
+        cleaned_text = limpiar_log_irclog_avanzado(raw_text)
+        lines = cleaned_text.split('\\n')
+        questions = detect_questions_advanced(lines)
+        participants = find_participants(lines)
+        result = build_narrative_blocks(questions, participants, len(lines))
+        
+        result["filename"] = file.filename
+        result["processing_info"] = {
+            "original_length": len(raw_text),
+            "cleaned_length": len(cleaned_text),
+            "lines_processed": len(lines),
+            "irc_codes_removed": len(raw_text) - len(cleaned_text)
+        }
+        
+        return result
+        
+    except Exception as e:
+        print(f"ERROR procesando archivo: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "status": "error",
+            "error": str(e),
+            "filename": file.filename if file else "unknown"
+        }
+
 # Endpoints de utilidad
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v3.0 - Versión Simplificada", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v3.1 - Con Soporte de Archivos", "status": "running"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "3.0.0"}
+    return {"status": "healthy", "version": "3.1.0"}
 
 @app.get("/test_sample")
 async def test_sample():
     """Test con muestra del log real"""
-    sample = """23:02:07'921 <Saga_Noren> 2,0 La buena: 0,4 AMENA2,0 Mandada por: ADRASTEA
-23:02:35'697 <Saga_Noren> 2,0 Las buenas: 0,4 VIRTUAL PRIVATE NETWORK, RED PRIVADA VIRTUAL2,0 Mandada por: CORT
-23:03:15'234 <Player1> alguna pista de esta?
-23:03:45'567 <Saga_Noren> 2,0 La buena: 0,4 MADRID2,0 Mandada por: PLAYER123"""
+    sample = """23:01:17'276 <VegaSicilia> 0,1 Pregunta: 0,4 2 / 350,14 Base Datos Preguntas: 12,15 TrivialIrc
+23:01:19'086 <VegaSicilia> 3,8 GASTRONOMÍA0,1 LICOR DE COLOR AMARILLO Y CONSISTENCIA ESPESA, PREPARADO CON YEMAS DE HUEVO, VAINILLA, CANELA, ALMENDRA MOLIDA, LECHE Y ALGÚN TIPO DE ALCOHOL, ORIGINARIO DE MÉXICO.4,0 ( 1 palabra )
+23:01:34'407 <VegaSicilia> 2,0 La buena: 0,4 ROMPOPE2,0 Mandada por: ^CASTRO^"""
     
-    # Procesarlo con el nuevo endpoint
+    # Procesarlo
     cleaned = limpiar_log_irclog_avanzado(sample)
-    lines = cleaned.split('\n')
+    lines = cleaned.split('\\n')
     questions = detect_questions_advanced(lines)
     participants = find_participants(lines)
     
