@@ -1,12 +1,11 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import re
-import json
 from typing import List, Dict, Any
 import uvicorn
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="3.4.1")
+app = FastAPI(title="Trivial IRC Log Processor", version="3.5.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -18,7 +17,7 @@ app.add_middleware(
 )
 
 def limpiar_log_irclog_avanzado(text: str) -> str:
-    """Limpiador avanzado que maneja códigos IRC en múltiples formatos"""
+    """Limpiador avanzado que maneja códigos IRC"""
     try:
         text = codecs.decode(text, 'unicode_escape')
     except:
@@ -49,7 +48,7 @@ def limpiar_log_irclog_avanzado(text: str) -> str:
     return '\\n'.join(cleaned_lines)
 
 def detect_questions_advanced(lines: List[str]) -> List[Dict]:
-    """Detección avanzada de preguntas con más contexto"""
+    """Detección avanzada de preguntas"""
     questions = []
     
     for i, line in enumerate(lines):
@@ -103,7 +102,7 @@ def detect_questions_advanced(lines: List[str]) -> List[Dict]:
     return questions
 
 def find_participants(lines: List[str]) -> List[str]:
-    """Encuentra los participantes del juego"""
+    """Encuentra participantes del juego"""
     participants = set()
     
     for line in lines:
@@ -121,25 +120,94 @@ def find_participants(lines: List[str]) -> List[str]:
     
     return sorted(list(participants))
 
-def process_questions_chunk(raw_text: str, start_question: int = 1, filename: str = "log.txt") -> Dict[str, Any]:
-    """Lógica central que funcionó - extraída como función reutilizable"""
+# Variable global para almacenar el último archivo procesado
+last_processed_file = {"content": "", "filename": ""}
+
+@app.post("/process_file")
+async def process_file(file: UploadFile = File(...)):
+    """Procesa archivo y guarda en memoria para continuaciones"""
+    global last_processed_file
+    
+    try:
+        print(f"DEBUG: Recibido archivo {file.filename}")
+        
+        content = await file.read()
+        raw_text = ""
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                raw_text = content.decode(encoding, errors='ignore')
+                break
+            except:
+                continue
+        
+        if not raw_text.strip():
+            return {"status": "error", "error": f"No se pudo leer {file.filename}"}
+        
+        # GUARDAR en memoria para continuaciones
+        last_processed_file = {
+            "content": raw_text,
+            "filename": file.filename
+        }
+        
+        # Procesar primera parte (1-12)
+        result = process_chunk(raw_text, start_question=1, filename=file.filename)
+        return result
+        
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+@app.post("/continue_file")
+async def continue_file(request: Request):
+    """Continúa procesando el archivo guardado en memoria"""
+    global last_processed_file
+    
+    try:
+        body = await request.body()
+        
+        # Buscar número de pregunta en el body
+        body_text = body.decode('utf-8', errors='ignore')
+        start_question = 13  # por defecto
+        
+        if body_text.strip().isdigit():
+            start_question = int(body_text.strip())
+        
+        print(f"DEBUG: Continuando desde pregunta {start_question}")
+        
+        if not last_processed_file["content"]:
+            return {"status": "error", "error": "No hay archivo previo en memoria"}
+        
+        # Usar el archivo guardado en memoria (SIN problemas de JSON)
+        result = process_chunk(
+            last_processed_file["content"], 
+            start_question=start_question, 
+            filename=last_processed_file["filename"]
+        )
+        
+        return result
+        
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+def process_chunk(raw_text: str, start_question: int = 1, filename: str = "log.txt") -> Dict[str, Any]:
+    """Lógica unificada que funcionó"""
     
     cleaned_text = limpiar_log_irclog_avanzado(raw_text)
     lines = cleaned_text.split('\\n')
     all_questions = detect_questions_advanced(lines)
     participants = find_participants(lines)
     
-    print(f"DEBUG: Total preguntas detectadas: {len(all_questions)}")
-    print(f"DEBUG: Procesando desde pregunta: {start_question}")
+    print(f"DEBUG: Total preguntas: {len(all_questions)}, desde: {start_question}")
     
     # Filtrar desde start_question
     questions_from_start = [q for q in all_questions if q['number'] >= start_question]
-    
-    # Limitar a 12 preguntas
     limited_questions = questions_from_start[:12]
     remaining_count = len(questions_from_start) - 12
     
-    # Crear bloques (4 preguntas por bloque)
+    # Crear bloques
     blocks = []
     block_size = 4
     
@@ -175,77 +243,16 @@ def process_questions_chunk(raw_text: str, start_question: int = 1, filename: st
             "blocks_created": len(blocks),
             "showing_range": [start_question, start_question + len(limited_questions) - 1] if limited_questions else [start_question, start_question],
             "remaining_questions": remaining_count if remaining_count > 0 else 0
-        },
-        "processing_info": {
-            "original_length": len(raw_text),
-            "cleaned_length": len(cleaned_text),
-            "lines_processed": len(lines)
         }
     }
 
-@app.post("/process_file")
-async def process_file(file: UploadFile = File(...)):
-    """Endpoint original que funcionó - PRIMERA PARTE"""
-    try:
-        print(f"DEBUG: Recibido archivo {file.filename}")
-        
-        content = await file.read()
-        raw_text = ""
-        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
-        
-        for encoding in encodings:
-            try:
-                raw_text = content.decode(encoding, errors='ignore')
-                break
-            except:
-                continue
-        
-        if not raw_text.strip():
-            return {"status": "error", "error": f"No se pudo leer {file.filename}"}
-        
-        result = process_questions_chunk(raw_text, start_question=1, filename=file.filename)
-        return result
-        
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return {"status": "error", "error": str(e)}
-
-@app.post("/continue_as_file")
-async def continue_as_file(request: Request):
-    """Continúa usando la misma lógica pero con texto plano + prefijo especial"""
-    try:
-        body = await request.body()
-        content = body.decode('utf-8', errors='ignore')
-        
-        # Buscar prefijo especial: START_QUESTION:13\\n
-        if content.startswith("START_QUESTION:"):
-            lines = content.split('\\n', 1)
-            start_question = int(lines[0].replace("START_QUESTION:", ""))
-            raw_text = lines[1] if len(lines) > 1 else ""
-        else:
-            start_question = 1
-            raw_text = content
-        
-        print(f"DEBUG: continue_as_file - start_question: {start_question}")
-        
-        if not raw_text.strip():
-            return {"status": "error", "error": "Contenido vacío"}
-        
-        # Usar EXACTAMENTE la misma lógica que funcionó
-        result = process_questions_chunk(raw_text, start_question=start_question, filename="log_continuation.txt")
-        return result
-        
-    except Exception as e:
-        print(f"ERROR en continue_as_file: {str(e)}")
-        return {"status": "error", "error": str(e)}
-
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v3.4.1 - Método Híbrido Simplificado", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v3.5 - Memoria Unificada", "status": "running"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "3.4.1"}
+    return {"status": "healthy", "version": "3.5.0"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
