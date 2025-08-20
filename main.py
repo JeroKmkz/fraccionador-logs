@@ -199,6 +199,9 @@ async def clean_log(request: Request):
         body = await request.body()
         text_content = body.decode('utf-8', errors='ignore')
         
+        print(f"DEBUG: Texto recibido: {len(text_content)} caracteres")
+        print(f"DEBUG: Primeros 100 caracteres: {text_content[:100]}")
+        
         if not text_content.strip():
             return {
                 "status": "error",
@@ -207,11 +210,15 @@ async def clean_log(request: Request):
                 "question_lines_found": 0
             }
         
+        # Limpiar el texto
         cleaned = limpiar_log_irclog_avanzado(text_content)
         lines = cleaned.split('\n')
         buena_lines = [i for i, line in enumerate(lines) if 'la buena:' in line.lower() or 'las buenas:' in line.lower()]
         
-        return {
+        print(f"DEBUG: Texto limpio: {len(cleaned)} caracteres")
+        print(f"DEBUG: Líneas con 'buena': {len(buena_lines)}")
+        
+        result = {
             "status": "cleaned",
             "original_length": len(text_content),
             "cleaned_length": len(cleaned), 
@@ -222,7 +229,13 @@ async def clean_log(request: Request):
             "preview_last_200": cleaned[-200:] if len(cleaned) > 200 else ""
         }
         
+        print(f"DEBUG: Resultado final: {result}")
+        return result
+        
     except Exception as e:
+        print(f"ERROR en clean_log: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             "status": "error",
             "error": str(e),
@@ -306,3 +319,4 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
