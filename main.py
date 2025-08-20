@@ -313,7 +313,24 @@ async def process_file_continue(request: Request):
     """Continúa procesando desde una pregunta específica"""
     try:
         body = await request.body()
-        data = json.loads(body.decode('utf-8'))
+        
+        # Limpiar el cuerpo antes de parsear JSON
+        body_text = body.decode('utf-8', errors='ignore')
+        
+        # Limpiar caracteres de control que rompen JSON
+        import json
+        # Primero intentar parsear directo
+        try:
+            data = json.loads(body_text)
+        except json.JSONDecodeError:
+            # Si falla, limpiar caracteres problemáticos
+            cleaned_body = re.sub(r'[\\x00-\\x1F\\x7F]', ' ', body_text)  # Quitar caracteres de control
+            cleaned_body = re.sub(r'[""''´`]', '"', cleaned_body)      # Normalizar comillas
+            cleaned_body = re.sub(r'\\s+', ' ', cleaned_body)          # Normalizar espacios
+            try:
+                data = json.loads(cleaned_body)
+            except:
+                return {"status": "error", "error": "No se pudo parsear el JSON"}
         
         raw_text = data.get('text', '')
         start_question = data.get('start_question', 13)
@@ -321,15 +338,21 @@ async def process_file_continue(request: Request):
         if not raw_text.strip():
             return {"status": "error", "error": "Contenido vacío"}
         
-        # Procesar texto
+        print(f"DEBUG: Continuando desde pregunta {start_question}")
+        
+        # Procesar texto (ya limpio)
         cleaned_text = limpiar_log_irclog_avanzado(raw_text)
         lines = cleaned_text.split('\\n')
         all_questions = detect_questions_advanced(lines)
         participants = find_participants(lines)
         
+        print(f"DEBUG: Total preguntas encontradas: {len(all_questions)}")
+        
         # Tomar solo las preguntas desde start_question
         questions_subset = [q for q in all_questions if q['number'] >= start_question]
         limited_questions = questions_subset[:12]  # Máximo 12 más
+        
+        print(f"DEBUG: Preguntas en este bloque: {len(limited_questions)}")
         
         # Crear bloques
         blocks = []
@@ -360,12 +383,15 @@ async def process_file_continue(request: Request):
         return {
             "status": "continued",
             "total_questions": len(all_questions),
-            "showing_range": [start_question, start_question + len(limited_questions) - 1],
+            "showing_range": [start_question, start_question + len(limited_questions) - 1] if limited_questions else [start_question, start_question],
             "blocks": blocks,
             "remaining_questions": remaining if remaining > 0 else 0
         }
         
     except Exception as e:
+        print(f"ERROR en process_file_continue: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {"status": "error", "error": str(e)}
 
 # Endpoints de utilidad
@@ -401,3 +427,4 @@ async def test_sample():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
