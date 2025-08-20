@@ -1,12 +1,13 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import re
+import json
 from typing import List, Dict, Any
 import uvicorn
 import gc
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="2.1.0")
+app = FastAPI(title="Trivial IRC Log Processor", version="2.2.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -191,144 +192,6 @@ def build_blocks_safe(raw_text: str) -> Dict[str, Any]:
             "error": str(e)
         }
 
-@app.post("/count_lines")
-async def count_lines(file: UploadFile = File(...)):
-    """Solo cuenta líneas sin procesar nada pesado"""
-    try:
-        print(f"DEBUG: Iniciando count_lines para {file.filename}")
-        
-        content = await file.read()
-        text = content.decode('utf-8', errors='ignore')
-        lines = text.split('\n')
-        
-        # Buscar líneas con "buena" en las primeras 100 líneas
-        buena_samples = []
-        buena_count = 0
-        
-        for i, line in enumerate(lines[:100]):
-            if 'buena' in line.lower():
-                buena_count += 1
-                buena_samples.append({
-                    "line_number": i,
-                    "content": line[:150]
-                })
-        
-        del content, text, lines
-        gc.collect()
-        
-        return {
-            "filename": file.filename,
-            "total_lines": len(lines) if 'lines' in locals() else 0,
-            "buena_samples": buena_samples,
-            "buena_count": buena_count,
-            "status": "completed"
-        }
-        
-    except Exception as e:
-        return {
-            "filename": file.filename if file else "unknown",
-            "error": str(e),
-            "status": "failed"
-        }
-
-@app.post("/test_clean")
-async def test_clean(file: UploadFile = File(...)):
-    """Probar solo la limpieza del archivo"""
-    try:
-        content = await file.read()
-        text = content.decode('utf-8', errors='ignore')
-        
-        print(f"DEBUG: Texto original: {len(text)} caracteres")
-        
-        # Aplicar limpieza
-        cleaned = limpiar_log_irclog_avanzado(text)
-        lines = cleaned.split('\n')
-        
-        print(f"DEBUG: Después de limpiar: {len(cleaned)} caracteres, {len(lines)} líneas")
-        
-        # Buscar líneas con "la buena:" después de limpiar
-        buena_lines = []
-        for i, line in enumerate(lines):
-            if 'la buena:' in line.lower() or 'las buenas:' in line.lower():
-                buena_lines.append({
-                    "line_number": i,
-                    "content": line[:200]
-                })
-        
-        return {
-            "filename": file.filename,
-            "original_length": len(text),
-            "cleaned_length": len(cleaned),
-            "total_lines": len(lines),
-            "buena_lines_found": len(buena_lines),
-            "buena_samples": buena_lines[:5],
-            "cleaning_success": len(buena_lines) > 0
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.post("/process_file_direct")
-async def process_file_direct(file: UploadFile = File(...)):
-    """Procesa archivo directamente"""
-    try:
-        print(f"DEBUG: Iniciando process_file_direct para {file.filename}")
-        
-        content = await file.read()
-        text_content = content.decode('utf-8', errors='ignore')
-        print(f"DEBUG: Archivo {file.filename}, {len(text_content)} caracteres")
-        
-        # Limpiar
-        cleaned = limpiar_log_irclog_avanzado(text_content)
-        lines = cleaned.split('\n')
-        print(f"DEBUG: Después de limpiar: {len(lines)} líneas")
-        
-        # Buscar líneas con respuestas
-        buena_count = 0
-        for line in lines:
-            if 'la buena:' in line.lower() or 'las buenas:' in line.lower():
-                buena_count += 1
-        
-        print(f"DEBUG: Encontradas {buena_count} líneas con respuestas")
-        
-        # Procesar bloques si hay preguntas
-        if buena_count > 0:
-            result = build_blocks_safe(cleaned)
-            result["filename"] = file.filename
-            result["cleaning_info"] = {
-                "original_length": len(text_content),
-                "cleaned_length": len(cleaned),
-                "questions_found": buena_count
-            }
-        else:
-            result = {
-                "filename": file.filename,
-                "total_questions": 0,
-                "total_lines": len(lines),
-                "blocks": [],
-                "error": "No se encontraron preguntas en el archivo",
-                "cleaning_info": {
-                    "original_length": len(text_content),
-                    "cleaned_length": len(cleaned),
-                    "questions_found": 0
-                }
-            }
-        
-        del content, text_content, cleaned, lines
-        gc.collect()
-        
-        return result
-        
-    except Exception as e:
-        print(f"ERROR en process_file_direct: {str(e)}")
-        return {
-            "filename": file.filename if file else "unknown",
-            "total_questions": 0,
-            "total_lines": 0,
-            "blocks": [],
-            "error": str(e)
-        }
-
 @app.post("/clean_log")
 async def clean_log(request: Request):
     """Action 1: Limpia códigos IRC del texto"""
@@ -385,9 +248,40 @@ async def process_text_plain(request: Request):
     except Exception as e:
         raise HTTPException(500, f"Error procesando texto: {str(e)}")
 
+@app.post("/process_chunk")
+async def process_chunk(request: Request):
+    """Action 3: Procesa un tramo específico del log limpio"""
+    try:
+        body = await request.body()
+        data = json.loads(body.decode('utf-8'))
+        
+        text_content = data.get('text', '')
+        chunk_info = data.get('chunk_info', 'Tramo no especificado')
+        
+        if not text_content.strip():
+            return {
+                "status": "error", 
+                "error": "Contenido vacío",
+                "chunk_info": chunk_info
+            }
+        
+        # Procesar este tramo específico
+        result = build_blocks_safe(text_content)
+        result["chunk_info"] = chunk_info
+        result["status"] = "processed"
+        
+        return result
+    
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "chunk_info": chunk_info if 'chunk_info' in locals() else "desconocido"
+        }
+
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v2.1", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v2.2", "status": "running"}
 
 @app.get("/health")
 async def health():
