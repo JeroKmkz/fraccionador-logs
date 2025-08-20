@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import re
 import json
@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import uvicorn
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="3.2.0")
+app = FastAPI(title="Trivial IRC Log Processor", version="3.3.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -121,33 +121,49 @@ def find_participants(lines: List[str]) -> List[str]:
     
     return sorted(list(participants))
 
-@app.post("/process_direct")
-async def process_direct(request: Request):
-    """Endpoint único que procesa log completo con límite de 12 preguntas por respuesta"""
+@app.post("/process_file")
+async def process_file(file: UploadFile = File(...)):
+    """Endpoint que funcionó perfectamente - SIN CAMBIOS"""
     try:
-        body = await request.body()
-        raw_text = body.decode('utf-8', errors='ignore')
+        print(f"DEBUG: Recibido archivo {file.filename}, tipo: {file.content_type}")
         
-        print(f"DEBUG: Recibido texto de {len(raw_text)} caracteres")
+        # Leer contenido del archivo
+        content = await file.read()
+        print(f"DEBUG: Archivo leído, {len(content)} bytes")
+        
+        # Intentar diferentes encodings
+        raw_text = ""
+        encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+        for encoding in encodings:
+            try:
+                raw_text = content.decode(encoding, errors='ignore')
+                print(f"DEBUG: Decodificado exitosamente con {encoding}")
+                break
+            except:
+                continue
         
         if not raw_text.strip():
-            return {"status": "error", "error": "Contenido vacío"}
+            return {
+                "status": "error",
+                "error": f"No se pudo leer el contenido del archivo {file.filename}"
+            }
         
-        # Limpiar códigos IRC
+        print(f"DEBUG: Texto decodificado: {len(raw_text)} caracteres")
+        
+        # Procesar - EXACTAMENTE como funcionó antes
         cleaned_text = limpiar_log_irclog_avanzado(raw_text)
         lines = cleaned_text.split('\\n')
-        
-        # Detectar preguntas
         all_questions = detect_questions_advanced(lines)
         participants = find_participants(lines)
         
         print(f"DEBUG: Total preguntas detectadas: {len(all_questions)}")
         
-        # Limitar a las primeras 12 preguntas
+        # Limitar a las primeras 12 preguntas - COMO FUNCIONÓ
         limited_questions = all_questions[:12]
         remaining_questions = len(all_questions) - 12
         
-        # Crear bloques (4 preguntas por bloque)
+        # Crear bloques (4 preguntas por bloque) - COMO FUNCIONÓ
         blocks = []
         block_size = 4
         
@@ -171,17 +187,19 @@ async def process_direct(request: Request):
             
             blocks.append(block)
         
-        return {
+        result = {
             "status": "success",
             "total_questions": len(all_questions),
             "total_lines": len(lines),
             "participants": participants[:10],
             "blocks": blocks,
+            "filename": file.filename,
             "summary": {
                 "game_info": f"Partida con {len(all_questions)} preguntas y {len(participants)} participantes",
                 "blocks_created": len(blocks),
                 "showing_first": len(limited_questions),
-                "remaining_questions": remaining_questions if remaining_questions > 0 else 0
+                "remaining_questions": remaining_questions if remaining_questions > 0 else 0,
+                "next_instruction": f"Para continuar, divide el log desde la pregunta 13 en adelante y súbelo como nuevo archivo" if remaining_questions > 0 else "Log completamente procesado"
             },
             "processing_info": {
                 "original_length": len(raw_text),
@@ -190,94 +208,25 @@ async def process_direct(request: Request):
             }
         }
         
+        return result
+        
     except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return {"status": "error", "error": str(e)}
-
-@app.post("/continue_from")
-async def continue_from(request: Request):
-    """Continúa procesando desde una pregunta específica"""
-    try:
-        body = await request.body()
-        
-        # Limpiar caracteres problemáticos antes de parsear JSON
-        body_text = body.decode('utf-8', errors='ignore')
-        body_clean = re.sub(r'[\\x00-\\x1F\\x7F-\\x9F]', ' ', body_text)
-        body_clean = re.sub(r'[""''´`]', '"', body_clean)
-        
-        try:
-            data = json.loads(body_clean)
-        except json.JSONDecodeError as e:
-            print(f"ERROR JSON: {e}")
-            return {"status": "error", "error": f"Error parsing JSON: {str(e)}"}
-        
-        raw_text = data.get('text', '')
-        start_question = data.get('start_question', 13)
-        
-        if not raw_text.strip():
-            return {"status": "error", "error": "Contenido vacío"}
-        
-        print(f"DEBUG: Continuando desde pregunta {start_question}")
-        
-        # Procesar texto
-        cleaned_text = limpiar_log_irclog_avanzado(raw_text)
-        lines = cleaned_text.split('\\n')
-        all_questions = detect_questions_advanced(lines)
-        
-        # Filtrar preguntas desde start_question
-        questions_subset = [q for q in all_questions if q['number'] >= start_question]
-        limited_questions = questions_subset[:12]
-        
-        print(f"DEBUG: Preguntas en este bloque: {len(limited_questions)}")
-        
-        # Crear bloques
-        blocks = []
-        block_size = 4
-        
-        for i in range(0, len(limited_questions), block_size):
-            block_questions = limited_questions[i:i + block_size]
-            
-            if not block_questions:
-                continue
-                
-            block = {
-                "block_number": len(blocks) + 1,
-                "question_range": [block_questions[0]['number'], block_questions[-1]['number']],
-                "questions": []
-            }
-            
-            for q in block_questions:
-                context_short = q['question_context'][:100] if q['question_context'] else ""
-                block["questions"].append({
-                    "number": q['number'],
-                    "answer": q['answer'][:100],
-                    "author": q['author'],
-                    "context": context_short
-                })
-            
-            blocks.append(block)
-        
-        remaining = len(all_questions) - start_question - len(limited_questions) + 1
-        
+        print(f"ERROR procesando archivo: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
-            "status": "continued",
-            "total_questions": len(all_questions),
-            "showing_range": [start_question, start_question + len(limited_questions) - 1] if limited_questions else [start_question, start_question],
-            "blocks": blocks,
-            "remaining_questions": remaining if remaining > 0 else 0
+            "status": "error",
+            "error": str(e),
+            "filename": file.filename if file else "unknown"
         }
-        
-    except Exception as e:
-        print(f"ERROR en continue_from: {str(e)}")
-        return {"status": "error", "error": str(e)}
 
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v3.2 - Solo Texto", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v3.3 - Divide y Vencerás", "status": "running"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "3.2.0"}
+    return {"status": "healthy", "version": "3.3.0"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
