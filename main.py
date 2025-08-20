@@ -138,7 +138,7 @@ def find_participants(lines: List[str]) -> List[str]:
     return sorted(list(participants))
 
 def build_narrative_blocks(questions: List[Dict], participants: List[str], total_lines: int) -> Dict[str, Any]:
-    """Construye bloques narrativos con toda la información"""
+    """Construye bloques narrativos con respuesta limitada a 12 preguntas para evitar ResponseTooLargeError"""
     
     if not questions:
         return {
@@ -150,13 +150,16 @@ def build_narrative_blocks(questions: List[Dict], participants: List[str], total
             "message": "No se encontraron preguntas en el log"
         }
     
-    # Dividir en bloques de máximo 8 preguntas
-    total_questions = len(questions)
-    block_size = min(8, max(1, total_questions // max(1, total_questions // 8)))
+    # Limitar a máximo 12 preguntas por respuesta
+    limited_questions = questions[:12]
+    remaining_questions = len(questions) - 12
     
+    # Dividir en bloques de máximo 4 preguntas cada uno
+    block_size = 4
     blocks = []
-    for i in range(0, total_questions, block_size):
-        block_questions = questions[i:i + block_size]
+    
+    for i in range(0, len(limited_questions), block_size):
+        block_questions = limited_questions[i:i + block_size]
         
         block = {
             "block_number": len(blocks) + 1,
@@ -165,26 +168,29 @@ def build_narrative_blocks(questions: List[Dict], participants: List[str], total
         }
         
         for q in block_questions:
+            # Limitar el contexto para reducir tamaño
+            context_short = q['question_context'][:100] if q['question_context'] else ""
+            
             block["questions"].append({
                 "number": q['number'],
-                "answer": q['answer'],
+                "answer": q['answer'][:100],  # Limitar respuesta a 100 chars
                 "author": q['author'],
-                "context": q['question_context'],
-                "line_index": q['line_index']
+                "context": context_short
             })
         
         blocks.append(block)
     
     return {
         "status": "success",
-        "total_questions": total_questions,
+        "total_questions": len(questions),
         "total_lines": total_lines,
-        "participants": participants,
+        "participants": participants[:10],  # Limitar participantes
         "blocks": blocks,
         "summary": {
-            "game_info": f"Partida con {total_questions} preguntas y {len(participants)} participantes",
+            "game_info": f"Partida con {len(questions)} preguntas y {len(participants)} participantes",
             "blocks_created": len(blocks),
-            "questions_per_block": f"~{block_size} preguntas por bloque"
+            "showing_first": len(limited_questions),
+            "remaining_questions": remaining_questions if remaining_questions > 0 else 0
         }
     }
 
@@ -301,6 +307,66 @@ async def process_file(file: UploadFile = File(...)):
             "error": str(e),
             "filename": file.filename if file else "unknown"
         }
+
+@app.post("/process_file_continue")
+async def process_file_continue(request: Request):
+    """Continúa procesando desde una pregunta específica"""
+    try:
+        body = await request.body()
+        data = json.loads(body.decode('utf-8'))
+        
+        raw_text = data.get('text', '')
+        start_question = data.get('start_question', 13)
+        
+        if not raw_text.strip():
+            return {"status": "error", "error": "Contenido vacío"}
+        
+        # Procesar texto
+        cleaned_text = limpiar_log_irclog_avanzado(raw_text)
+        lines = cleaned_text.split('\\n')
+        all_questions = detect_questions_advanced(lines)
+        participants = find_participants(lines)
+        
+        # Tomar solo las preguntas desde start_question
+        questions_subset = [q for q in all_questions if q['number'] >= start_question]
+        limited_questions = questions_subset[:12]  # Máximo 12 más
+        
+        # Crear bloques
+        blocks = []
+        block_size = 4
+        
+        for i in range(0, len(limited_questions), block_size):
+            block_questions = limited_questions[i:i + block_size]
+            
+            block = {
+                "block_number": len(blocks) + 1,
+                "question_range": [block_questions[0]['number'], block_questions[-1]['number']],
+                "questions": []
+            }
+            
+            for q in block_questions:
+                context_short = q['question_context'][:100] if q['question_context'] else ""
+                block["questions"].append({
+                    "number": q['number'],
+                    "answer": q['answer'][:100],
+                    "author": q['author'],
+                    "context": context_short
+                })
+            
+            blocks.append(block)
+        
+        remaining = len(all_questions) - start_question - len(limited_questions) + 1
+        
+        return {
+            "status": "continued",
+            "total_questions": len(all_questions),
+            "showing_range": [start_question, start_question + len(limited_questions) - 1],
+            "blocks": blocks,
+            "remaining_questions": remaining if remaining > 0 else 0
+        }
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 # Endpoints de utilidad
 @app.get("/")
