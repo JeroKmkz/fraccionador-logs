@@ -1,15 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import re
-import base64
-from typing import List, Dict, Optional
-import json
 import uuid
+from typing import List, Dict, Optional
+import asyncio
+from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="4.0.0")
+app = FastAPI(title="Trivial Chunker API", version="5.0.0")
 
-# CORS para permitir llamadas desde ChatGPT
+# CORS para ChatGPT
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,183 +18,224 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacenamiento temporal de sesiones (en producción usar Redis)
-sessions = {}
+# Almacenamiento en memoria con TTL
+file_storage = {}
 
-class ProcessRequest(BaseModel):
-    content_base64: str
-    session_id: Optional[str] = None
-    
-class ContinueRequest(BaseModel):
-    session_id: str
-    from_question: int
-
+class FileSession:
+    def __init__(self, content: str, questions: List[Dict]):
+        self.content = content
+        self.questions = questions
+        self.created_at = datetime.now()
+        self.last_accessed = datetime.now()
+        
 class ProcessResponse(BaseModel):
     session_id: str
     total_questions: int
-    current_batch: Dict
+    questions_batch: List[Dict]
+    batch_number: int
+    total_batches: int
     has_more: bool
-    next_question: Optional[int]
 
-def limpiar_log_irc(text: str) -> str:
-    """Limpia completamente los códigos IRC del texto"""
-    # Eliminar códigos de color IRC (\x03 seguido de números)
-    text = re.sub(r'\x03\d{1,2}(?:,\d{1,2})?', '', text)
-    # Eliminar otros códigos de control IRC
-    text = re.sub(r'[\x00-\x1F\x7F]', '', text)
-    # Limpiar marcadores de color restantes
-    text = re.sub(r'\d+,\d+\s*', '', text)
-    return text
+def limpiar_log_irc(text: bytes) -> str:
+    """Limpia códigos IRC del texto binario"""
+    try:
+        # Decodificar ignorando errores
+        text_str = text.decode('utf-8', errors='ignore')
+    except:
+        text_str = text.decode('latin-1', errors='ignore')
+    
+    # Eliminar códigos de color IRC
+    text_str = re.sub(b'\x03\d{0,2}(?:,\d{1,2})?'.decode('utf-8', errors='ignore'), '', text_str)
+    text_str = re.sub(b'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]'.decode('utf-8', errors='ignore'), '', text_str)
+    
+    # Limpiar patrones de color restantes
+    text_str = re.sub(r'(?:^|\s)\d+,\d+\s+', ' ', text_str)
+    
+    return text_str
 
-def extract_question_block(lines: List[str], start_idx: int, end_idx: int) -> Dict:
-    """Extrae información de un bloque de preguntas"""
+def extract_all_questions(text: str) -> List[Dict]:
+    """Extrae TODAS las preguntas del log de una vez"""
+    lines = text.split('\n')
     questions = []
     current_q = None
     
-    for i in range(start_idx, min(end_idx, len(lines))):
-        line = lines[i]
-        
+    for i, line in enumerate(lines):
         # Detectar nueva pregunta
         pregunta_match = re.search(r'Pregunta:\s*(\d+)\s*/\s*(\d+)', line)
         if pregunta_match:
-            if current_q:
+            if current_q and current_q.get('pregunta'):  # Solo guardar si tiene contenido
                 questions.append(current_q)
+            
             current_q = {
                 'numero': int(pregunta_match.group(1)),
                 'total': int(pregunta_match.group(2)),
                 'categoria': '',
                 'pregunta': '',
                 'respuestas': [],
-                'ganador': '',
-                'respuesta_correcta': ''
+                'ganador': None,
+                'respuesta_correcta': '',
+                'tiempo': ''
             }
             continue
             
         if current_q:
+            # Extraer hora
+            if not current_q['tiempo']:
+                tiempo_match = re.match(r'^(\d{2}:\d{2}:\d{2})', line)
+                if tiempo_match:
+                    current_q['tiempo'] = tiempo_match.group(1)
+            
             # Detectar categoría y pregunta
-            if 'MEDICINA' in line or 'GASTRONOMÍA' in line or 'INFORMÁTICA' in line or 'DEPORTE' in line:
-                parts = re.split(r'(?:MEDICINA-SALUD|GASTRONOMÍA|INFORMÁTICA|DEPORTE)', line)
-                if len(parts) > 1:
-                    categoria_match = re.search(r'(MEDICINA-SALUD|GASTRONOMÍA|INFORMÁTICA|DEPORTE)', line)
-                    if categoria_match:
-                        current_q['categoria'] = categoria_match.group(1)
-                    current_q['pregunta'] = parts[-1].strip()
-                    
-            # Detectar respuestas de jugadores
-            elif '>>>' in line and 'scratchea' not in line:
+            categorias = ['MEDICINA-SALUD', 'GASTRONOMÍA', 'INFORMÁTICA', 'DEPORTE', 
+                         'HISTORIA', 'GEOGRAFÍA', 'CIENCIAS', 'ARTE', 'CINE', 'MÚSICA',
+                         'LITERATURA', 'TELEVISIÓN', 'POLÍTICA', 'ECONOMÍA']
+            
+            for cat in categorias:
+                if cat in line and not current_q['pregunta']:
+                    current_q['categoria'] = cat
+                    # Extraer pregunta después de la categoría
+                    pregunta_text = re.split(cat, line)[-1]
+                    # Limpiar pregunta
+                    pregunta_text = re.sub(r'\([^)]*palabras?\)', '', pregunta_text).strip()
+                    current_q['pregunta'] = pregunta_text
+                    break
+            
+            # Detectar respuestas de jugadores (cuando alguien acierta)
+            if '>>>' in line and 'scratchea' not in line and ' a ' in line:
                 player_match = re.search(r'>>>(\w+)', line)
+                tiempo_match = re.search(r'(\d+)[\'"](\d+)', line)
                 if player_match:
-                    current_q['respuestas'].append(player_match.group(1))
-                    
-            # Detectar ganador y respuesta correcta
-            elif 'La buena:' in line:
-                respuesta_match = re.search(r'La buena:\s*([^]+?)(?:Mandada por:|$)', line)
+                    respuesta = {
+                        'jugador': player_match.group(1),
+                        'tiempo': f"{tiempo_match.group(1)}.{tiempo_match.group(2)}" if tiempo_match else None
+                    }
+                    current_q['respuestas'].append(respuesta)
+                    if not current_q['ganador']:
+                        current_q['ganador'] = player_match.group(1)
+            
+            # Detectar respuesta correcta
+            if 'La buena:' in line or 'Las buenas:' in line:
+                respuesta_match = re.search(r'(?:La buena:|Las buenas:)\s*([^]+?)(?:Mandada por:|$)', line)
                 if respuesta_match:
                     current_q['respuesta_correcta'] = respuesta_match.group(1).strip()
-                if current_q['respuestas']:
-                    current_q['ganador'] = current_q['respuestas'][0]
     
-    if current_q:
+    # Agregar última pregunta si existe
+    if current_q and current_q.get('pregunta'):
         questions.append(current_q)
-        
-    return {
-        'questions': questions,
-        'from_question': questions[0]['numero'] if questions else start_idx,
-        'to_question': questions[-1]['numero'] if questions else end_idx
-    }
+    
+    return questions
 
-@app.post("/process_base64", response_model=ProcessResponse)
-async def process_base64(request: ProcessRequest):
-    """Procesa el log enviado en base64"""
+@app.post("/process_file_complete")
+async def process_file_complete(file: UploadFile = File(...)):
+    """Procesa el archivo completo y lo almacena en memoria"""
     try:
-        # Decodificar base64
-        decoded_bytes = base64.b64decode(request.content_base64)
-        text = decoded_bytes.decode('utf-8', errors='ignore')
+        # Leer archivo completo
+        content = await file.read()
         
-        # Limpiar el texto
-        text = limpiar_log_irc(text)
-        lines = text.split('\n')
+        # Limpiar el contenido
+        cleaned_text = limpiar_log_irc(content)
         
-        # Detectar todas las preguntas
-        question_indices = []
-        for i, line in enumerate(lines):
-            if re.search(r'Pregunta:\s*\d+\s*/\s*\d+', line):
-                question_indices.append(i)
+        # Extraer TODAS las preguntas
+        all_questions = extract_all_questions(cleaned_text)
         
-        total_questions = len(question_indices)
+        if not all_questions:
+            raise HTTPException(status_code=400, detail="No se detectaron preguntas en el archivo")
         
-        # Crear o recuperar sesión
-        session_id = request.session_id or str(uuid.uuid4())
+        # Generar ID de sesión
+        session_id = str(uuid.uuid4())
         
-        # Guardar datos de sesión
-        sessions[session_id] = {
-            'lines': lines,
-            'question_indices': question_indices,
-            'total_questions': total_questions
-        }
+        # Almacenar TODO en memoria
+        file_storage[session_id] = FileSession(cleaned_text, all_questions)
         
-        # Procesar primer batch (primeras 10 preguntas)
-        batch_size = 10
-        end_idx = question_indices[batch_size] if len(question_indices) > batch_size else len(lines)
+        # Limpiar sesiones antiguas (más de 1 hora)
+        cutoff_time = datetime.now() - timedelta(hours=1)
+        expired_sessions = [sid for sid, session in file_storage.items() 
+                          if session.created_at < cutoff_time]
+        for sid in expired_sessions:
+            del file_storage[sid]
         
-        current_batch = extract_question_block(lines, 0, end_idx)
+        # Preparar primera respuesta con batch de 12 preguntas
+        batch_size = 12
+        first_batch = all_questions[:batch_size]
+        total_batches = (len(all_questions) + batch_size - 1) // batch_size
         
         return ProcessResponse(
             session_id=session_id,
-            total_questions=total_questions,
-            current_batch=current_batch,
-            has_more=total_questions > batch_size,
-            next_question=batch_size + 1 if total_questions > batch_size else None
+            total_questions=len(all_questions),
+            questions_batch=first_batch,
+            batch_number=1,
+            total_batches=total_batches,
+            has_more=len(all_questions) > batch_size
         )
         
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error procesando el contenido: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando archivo: {str(e)}")
 
-@app.post("/continue_session", response_model=ProcessResponse)
-async def continue_session(request: ContinueRequest):
-    """Continúa procesando desde una pregunta específica"""
-    if request.session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+@app.get("/get_batch/{session_id}/{batch_number}")
+async def get_batch(session_id: str, batch_number: int):
+    """Obtiene un batch específico de preguntas de la sesión"""
+    if session_id not in file_storage:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
     
-    session = sessions[request.session_id]
-    lines = session['lines']
-    question_indices = session['question_indices']
-    total_questions = session['total_questions']
+    session = file_storage[session_id]
+    session.last_accessed = datetime.now()
     
-    # Calcular índices para el batch solicitado
-    batch_size = 10
-    start_q = request.from_question - 1  # Convertir a índice base 0
-    end_q = min(start_q + batch_size, total_questions)
+    batch_size = 12
+    total_questions = len(session.questions)
+    total_batches = (total_questions + batch_size - 1) // batch_size
     
-    if start_q >= total_questions:
-        raise HTTPException(status_code=400, detail="Número de pregunta fuera de rango")
+    if batch_number < 1 or batch_number > total_batches:
+        raise HTTPException(status_code=400, detail=f"Batch inválido. Debe estar entre 1 y {total_batches}")
     
-    start_idx = question_indices[start_q]
-    end_idx = question_indices[end_q] if end_q < total_questions else len(lines)
+    # Calcular índices
+    start_idx = (batch_number - 1) * batch_size
+    end_idx = min(start_idx + batch_size, total_questions)
     
-    current_batch = extract_question_block(lines, start_idx, end_idx)
+    questions_batch = session.questions[start_idx:end_idx]
     
     return ProcessResponse(
-        session_id=request.session_id,
+        session_id=session_id,
         total_questions=total_questions,
-        current_batch=current_batch,
-        has_more=end_q < total_questions,
-        next_question=end_q + 1 if end_q < total_questions else None
+        questions_batch=questions_batch,
+        batch_number=batch_number,
+        total_batches=total_batches,
+        has_more=batch_number < total_batches
     )
+
+@app.get("/get_all_questions/{session_id}")
+async def get_all_questions(session_id: str):
+    """Obtiene TODAS las preguntas de una vez (para GPTs con más memoria)"""
+    if session_id not in file_storage:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
+    
+    session = file_storage[session_id]
+    session.last_accessed = datetime.now()
+    
+    return {
+        "session_id": session_id,
+        "total_questions": len(session.questions),
+        "all_questions": session.questions
+    }
 
 @app.get("/")
 async def root():
     return {
         "service": "Trivial Chunker API",
-        "version": "4.0.0",
+        "version": "5.0.0",
         "status": "active",
+        "active_sessions": len(file_storage),
         "endpoints": [
-            "POST /process_base64 - Procesa log en base64",
-            "POST /continue_session - Continúa procesando desde pregunta X",
+            "POST /process_file_complete - Procesa archivo completo",
+            "GET /get_batch/{session_id}/{batch_number} - Obtiene batch específico",
+            "GET /get_all_questions/{session_id} - Obtiene todas las preguntas",
             "GET /health - Estado del servicio"
         ]
     }
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "sessions_active": len(sessions)}
+    return {
+        "status": "healthy",
+        "sessions_active": len(file_storage),
+        "memory_usage": sum(len(s.content) for s in file_storage.values())
+    }
