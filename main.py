@@ -4,10 +4,9 @@ from pydantic import BaseModel
 import re
 import uuid
 from typing import List, Dict, Optional
-import asyncio
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="5.0.0")
+app = FastAPI(title="Trivial Chunker API", version="6.0.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -18,28 +17,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacenamiento en memoria con TTL
-file_storage = {}
+# Almacenamiento en memoria
+sessions = {}
 
 class FileSession:
-    def __init__(self, content: str, questions: List[Dict]):
-        self.content = content
+    def __init__(self, questions: List[Dict]):
         self.questions = questions
         self.created_at = datetime.now()
-        self.last_accessed = datetime.now()
         
-class ProcessResponse(BaseModel):
-    session_id: str
-    total_questions: int
-    questions_batch: List[Dict]
-    batch_number: int
-    total_batches: int
-    has_more: bool
+class MinimalResponse(BaseModel):
+    sid: str  # session_id abreviado
+    tot: int  # total
+    b: int    # batch number
+    tb: int   # total batches
+    nxt: bool # has next
+    q: List[Dict]  # questions
 
 def limpiar_log_irc(text: bytes) -> str:
     """Limpia códigos IRC del texto binario"""
     try:
-        # Decodificar ignorando errores
         text_str = text.decode('utf-8', errors='ignore')
     except:
         text_str = text.decode('latin-1', errors='ignore')
@@ -47,195 +43,157 @@ def limpiar_log_irc(text: bytes) -> str:
     # Eliminar códigos de color IRC
     text_str = re.sub(b'\x03\d{0,2}(?:,\d{1,2})?'.decode('utf-8', errors='ignore'), '', text_str)
     text_str = re.sub(b'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]'.decode('utf-8', errors='ignore'), '', text_str)
-    
-    # Limpiar patrones de color restantes
     text_str = re.sub(r'(?:^|\s)\d+,\d+\s+', ' ', text_str)
     
     return text_str
 
-def extract_all_questions(text: str) -> List[Dict]:
-    """Extrae TODAS las preguntas del log de una vez"""
+def extract_questions_minimal(text: str) -> List[Dict]:
+    """Extrae solo la información ESENCIAL de las preguntas"""
     lines = text.split('\n')
     questions = []
     current_q = None
     
-    for i, line in enumerate(lines):
+    for line in lines:
         # Detectar nueva pregunta
         pregunta_match = re.search(r'Pregunta:\s*(\d+)\s*/\s*(\d+)', line)
         if pregunta_match:
-            if current_q and current_q.get('pregunta'):  # Solo guardar si tiene contenido
+            if current_q and current_q.get('p'):  # Solo guardar si tiene contenido
                 questions.append(current_q)
             
             current_q = {
-                'numero': int(pregunta_match.group(1)),
-                'total': int(pregunta_match.group(2)),
-                'categoria': '',
-                'pregunta': '',
-                'respuestas': [],
-                'ganador': None,
-                'respuesta_correcta': '',
-                'tiempo': ''
+                'n': int(pregunta_match.group(1)),  # numero
+                'c': '',  # categoria (abreviada)
+                'p': '',  # pregunta (primeras 50 chars)
+                'g': '',  # ganador
+                'r': ''   # respuesta correcta (primeras 30 chars)
             }
             continue
             
         if current_q:
-            # Extraer hora
-            if not current_q['tiempo']:
-                tiempo_match = re.match(r'^(\d{2}:\d{2}:\d{2})', line)
-                if tiempo_match:
-                    current_q['tiempo'] = tiempo_match.group(1)
+            # Detectar categoría
+            categorias = {
+                'MEDICINA-SALUD': 'MED',
+                'GASTRONOMÍA': 'GAS', 
+                'INFORMÁTICA': 'INF',
+                'DEPORTE': 'DEP',
+                'HISTORIA': 'HIS',
+                'GEOGRAFÍA': 'GEO',
+                'CIENCIAS': 'CIE',
+                'ARTE': 'ART',
+                'CINE': 'CIN',
+                'MÚSICA': 'MUS',
+                'LITERATURA': 'LIT',
+                'TELEVISIÓN': 'TV',
+                'POLÍTICA': 'POL',
+                'ECONOMÍA': 'ECO'
+            }
             
-            # Detectar categoría y pregunta
-            categorias = ['MEDICINA-SALUD', 'GASTRONOMÍA', 'INFORMÁTICA', 'DEPORTE', 
-                         'HISTORIA', 'GEOGRAFÍA', 'CIENCIAS', 'ARTE', 'CINE', 'MÚSICA',
-                         'LITERATURA', 'TELEVISIÓN', 'POLÍTICA', 'ECONOMÍA']
-            
-            for cat in categorias:
-                if cat in line and not current_q['pregunta']:
-                    current_q['categoria'] = cat
-                    # Extraer pregunta después de la categoría
-                    pregunta_text = re.split(cat, line)[-1]
-                    # Limpiar pregunta
+            for cat_full, cat_abbr in categorias.items():
+                if cat_full in line and not current_q['c']:
+                    current_q['c'] = cat_abbr
+                    # Extraer pregunta (máximo 60 caracteres)
+                    pregunta_text = re.split(cat_full, line)[-1]
                     pregunta_text = re.sub(r'\([^)]*palabras?\)', '', pregunta_text).strip()
-                    current_q['pregunta'] = pregunta_text
+                    current_q['p'] = pregunta_text[:60]
                     break
             
-            # Detectar respuestas de jugadores (cuando alguien acierta)
-            if '>>>' in line and 'scratchea' not in line and ' a ' in line:
+            # Detectar primer ganador
+            if '>>>' in line and not current_q['g'] and 'scratchea' not in line:
                 player_match = re.search(r'>>>(\w+)', line)
-                tiempo_match = re.search(r'(\d+)[\'"](\d+)', line)
                 if player_match:
-                    respuesta = {
-                        'jugador': player_match.group(1),
-                        'tiempo': f"{tiempo_match.group(1)}.{tiempo_match.group(2)}" if tiempo_match else None
-                    }
-                    current_q['respuestas'].append(respuesta)
-                    if not current_q['ganador']:
-                        current_q['ganador'] = player_match.group(1)
+                    current_q['g'] = player_match.group(1)
             
-            # Detectar respuesta correcta
-            if 'La buena:' in line or 'Las buenas:' in line:
+            # Detectar respuesta correcta (máximo 40 caracteres)
+            if ('La buena:' in line or 'Las buenas:' in line) and not current_q['r']:
                 respuesta_match = re.search(r'(?:La buena:|Las buenas:)\s*([^]+?)(?:Mandada por:|$)', line)
                 if respuesta_match:
-                    current_q['respuesta_correcta'] = respuesta_match.group(1).strip()
+                    current_q['r'] = respuesta_match.group(1).strip()[:40]
     
-    # Agregar última pregunta si existe
-    if current_q and current_q.get('pregunta'):
+    # Agregar última pregunta
+    if current_q and current_q.get('p'):
         questions.append(current_q)
     
     return questions
 
-@app.post("/process_file_complete")
-async def process_file_complete(file: UploadFile = File(...)):
-    """Procesa el archivo completo y lo almacena en memoria"""
+@app.post("/process")
+async def process_file(file: UploadFile = File(...)):
+    """Procesa archivo y devuelve respuesta MINIMALISTA"""
     try:
-        # Leer archivo completo
+        # Leer y limpiar archivo
         content = await file.read()
-        
-        # Limpiar el contenido
         cleaned_text = limpiar_log_irc(content)
         
-        # Extraer TODAS las preguntas
-        all_questions = extract_all_questions(cleaned_text)
+        # Extraer preguntas con formato minimal
+        all_questions = extract_questions_minimal(cleaned_text)
         
         if not all_questions:
-            raise HTTPException(status_code=400, detail="No se detectaron preguntas en el archivo")
+            raise HTTPException(status_code=400, detail="No questions found")
         
-        # Generar ID de sesión
-        session_id = str(uuid.uuid4())
+        # Generar ID de sesión corto
+        session_id = str(uuid.uuid4())[:8]
         
-        # Almacenar TODO en memoria
-        file_storage[session_id] = FileSession(cleaned_text, all_questions)
+        # Guardar en memoria
+        sessions[session_id] = FileSession(all_questions)
         
-        # Limpiar sesiones antiguas (más de 1 hora)
-        cutoff_time = datetime.now() - timedelta(hours=1)
-        expired_sessions = [sid for sid, session in file_storage.items() 
-                          if session.created_at < cutoff_time]
-        for sid in expired_sessions:
-            del file_storage[sid]
+        # Limpiar sesiones antiguas
+        cutoff = datetime.now() - timedelta(hours=1)
+        expired = [sid for sid, s in sessions.items() if s.created_at < cutoff]
+        for sid in expired:
+            del sessions[sid]
         
-        # Preparar primera respuesta con batch de 12 preguntas
-        batch_size = 12
-        first_batch = all_questions[:batch_size]
-        total_batches = (len(all_questions) + batch_size - 1) // batch_size
+        # Preparar respuesta con solo 5 preguntas para mantener < 100KB
+        BATCH_SIZE = 5
+        first_batch = all_questions[:BATCH_SIZE]
+        total_batches = (len(all_questions) + BATCH_SIZE - 1) // BATCH_SIZE
         
-        return ProcessResponse(
-            session_id=session_id,
-            total_questions=len(all_questions),
-            questions_batch=first_batch,
-            batch_number=1,
-            total_batches=total_batches,
-            has_more=len(all_questions) > batch_size
+        return MinimalResponse(
+            sid=session_id,
+            tot=len(all_questions),
+            b=1,
+            tb=total_batches,
+            nxt=len(all_questions) > BATCH_SIZE,
+            q=first_batch
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando archivo: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)[:100])
 
-@app.get("/get_batch/{session_id}/{batch_number}")
-async def get_batch(session_id: str, batch_number: int):
-    """Obtiene un batch específico de preguntas de la sesión"""
-    if session_id not in file_storage:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
+@app.get("/next/{sid}/{b}")
+async def get_next_batch(sid: str, b: int):
+    """Obtiene el siguiente batch de preguntas"""
+    if sid not in sessions:
+        raise HTTPException(status_code=404, detail="Session expired")
     
-    session = file_storage[session_id]
-    session.last_accessed = datetime.now()
+    session = sessions[sid]
+    BATCH_SIZE = 5
     
-    batch_size = 12
     total_questions = len(session.questions)
-    total_batches = (total_questions + batch_size - 1) // batch_size
+    total_batches = (total_questions + BATCH_SIZE - 1) // BATCH_SIZE
     
-    if batch_number < 1 or batch_number > total_batches:
-        raise HTTPException(status_code=400, detail=f"Batch inválido. Debe estar entre 1 y {total_batches}")
+    if b < 1 or b > total_batches:
+        raise HTTPException(status_code=400, detail="Invalid batch")
     
-    # Calcular índices
-    start_idx = (batch_number - 1) * batch_size
-    end_idx = min(start_idx + batch_size, total_questions)
+    start = (b - 1) * BATCH_SIZE
+    end = min(start + BATCH_SIZE, total_questions)
     
-    questions_batch = session.questions[start_idx:end_idx]
-    
-    return ProcessResponse(
-        session_id=session_id,
-        total_questions=total_questions,
-        questions_batch=questions_batch,
-        batch_number=batch_number,
-        total_batches=total_batches,
-        has_more=batch_number < total_batches
+    return MinimalResponse(
+        sid=sid,
+        tot=total_questions,
+        b=b,
+        tb=total_batches,
+        nxt=b < total_batches,
+        q=session.questions[start:end]
     )
-
-@app.get("/get_all_questions/{session_id}")
-async def get_all_questions(session_id: str):
-    """Obtiene TODAS las preguntas de una vez (para GPTs con más memoria)"""
-    if session_id not in file_storage:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
-    
-    session = file_storage[session_id]
-    session.last_accessed = datetime.now()
-    
-    return {
-        "session_id": session_id,
-        "total_questions": len(session.questions),
-        "all_questions": session.questions
-    }
 
 @app.get("/")
 async def root():
     return {
         "service": "Trivial Chunker API",
-        "version": "5.0.0",
+        "version": "6.0.0",
         "status": "active",
-        "active_sessions": len(file_storage),
-        "endpoints": [
-            "POST /process_file_complete - Procesa archivo completo",
-            "GET /get_batch/{session_id}/{batch_number} - Obtiene batch específico",
-            "GET /get_all_questions/{session_id} - Obtiene todas las preguntas",
-            "GET /health - Estado del servicio"
-        ]
+        "sessions": len(sessions)
     }
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy",
-        "sessions_active": len(file_storage),
-        "memory_usage": sum(len(s.content) for s in file_storage.values())
-    }
+    return {"status": "healthy", "sessions": len(sessions)}
