@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import uvicorn
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="3.4.0")
+app = FastAPI(title="Trivial IRC Log Processor", version="3.4.1")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -124,7 +124,6 @@ def find_participants(lines: List[str]) -> List[str]:
 def process_questions_chunk(raw_text: str, start_question: int = 1, filename: str = "log.txt") -> Dict[str, Any]:
     """Lógica central que funcionó - extraída como función reutilizable"""
     
-    # EXACTAMENTE la misma lógica que funcionó en process_file
     cleaned_text = limpiar_log_irclog_avanzado(raw_text)
     lines = cleaned_text.split('\\n')
     all_questions = detect_questions_advanced(lines)
@@ -136,11 +135,11 @@ def process_questions_chunk(raw_text: str, start_question: int = 1, filename: st
     # Filtrar desde start_question
     questions_from_start = [q for q in all_questions if q['number'] >= start_question]
     
-    # Limitar a 12 preguntas - COMO FUNCIONÓ
+    # Limitar a 12 preguntas
     limited_questions = questions_from_start[:12]
     remaining_count = len(questions_from_start) - 12
     
-    # Crear bloques (4 preguntas por bloque) - COMO FUNCIONÓ
+    # Crear bloques (4 preguntas por bloque)
     blocks = []
     block_size = 4
     
@@ -204,7 +203,6 @@ async def process_file(file: UploadFile = File(...)):
         if not raw_text.strip():
             return {"status": "error", "error": f"No se pudo leer {file.filename}"}
         
-        # Usar la lógica que funcionó, desde pregunta 1
         result = process_questions_chunk(raw_text, start_question=1, filename=file.filename)
         return result
         
@@ -212,39 +210,42 @@ async def process_file(file: UploadFile = File(...)):
         print(f"ERROR: {str(e)}")
         return {"status": "error", "error": str(e)}
 
-@app.post("/process_like_file")
-async def process_like_file(request: Request):
-    """Nuevo endpoint que simula process_file pero recibe texto + offset"""
+@app.post("/continue_as_file")
+async def continue_as_file(request: Request):
+    """Continúa usando la misma lógica pero con texto plano + prefijo especial"""
     try:
-        # CLAVE: Recibir como texto plano (sin JSON) para evitar problemas de escape
         body = await request.body()
+        content = body.decode('utf-8', errors='ignore')
         
-        # Intentar extraer parámetros de headers personalizados
-        start_question = int(request.headers.get("X-Start-Question", "1"))
-        filename = request.headers.get("X-Filename", "log_continuation.txt")
+        # Buscar prefijo especial: START_QUESTION:13\\n
+        if content.startswith("START_QUESTION:"):
+            lines = content.split('\\n', 1)
+            start_question = int(lines[0].replace("START_QUESTION:", ""))
+            raw_text = lines[1] if len(lines) > 1 else ""
+        else:
+            start_question = 1
+            raw_text = content
         
-        print(f"DEBUG: process_like_file - start_question: {start_question}")
-        
-        raw_text = body.decode('utf-8', errors='ignore')
+        print(f"DEBUG: continue_as_file - start_question: {start_question}")
         
         if not raw_text.strip():
             return {"status": "error", "error": "Contenido vacío"}
         
         # Usar EXACTAMENTE la misma lógica que funcionó
-        result = process_questions_chunk(raw_text, start_question=start_question, filename=filename)
+        result = process_questions_chunk(raw_text, start_question=start_question, filename="log_continuation.txt")
         return result
         
     except Exception as e:
-        print(f"ERROR en process_like_file: {str(e)}")
+        print(f"ERROR en continue_as_file: {str(e)}")
         return {"status": "error", "error": str(e)}
 
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v3.4 - Método Híbrido", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v3.4.1 - Método Híbrido Simplificado", "status": "running"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "3.4.0"}
+    return {"status": "healthy", "version": "3.4.1"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
