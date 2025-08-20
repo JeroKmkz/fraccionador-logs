@@ -6,7 +6,7 @@ from typing import List, Dict, Any
 import uvicorn
 import codecs
 
-app = FastAPI(title="Trivial IRC Log Processor", version="3.3.0")
+app = FastAPI(title="Trivial IRC Log Processor", version="3.4.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -121,112 +121,130 @@ def find_participants(lines: List[str]) -> List[str]:
     
     return sorted(list(participants))
 
+def process_questions_chunk(raw_text: str, start_question: int = 1, filename: str = "log.txt") -> Dict[str, Any]:
+    """Lógica central que funcionó - extraída como función reutilizable"""
+    
+    # EXACTAMENTE la misma lógica que funcionó en process_file
+    cleaned_text = limpiar_log_irclog_avanzado(raw_text)
+    lines = cleaned_text.split('\\n')
+    all_questions = detect_questions_advanced(lines)
+    participants = find_participants(lines)
+    
+    print(f"DEBUG: Total preguntas detectadas: {len(all_questions)}")
+    print(f"DEBUG: Procesando desde pregunta: {start_question}")
+    
+    # Filtrar desde start_question
+    questions_from_start = [q for q in all_questions if q['number'] >= start_question]
+    
+    # Limitar a 12 preguntas - COMO FUNCIONÓ
+    limited_questions = questions_from_start[:12]
+    remaining_count = len(questions_from_start) - 12
+    
+    # Crear bloques (4 preguntas por bloque) - COMO FUNCIONÓ
+    blocks = []
+    block_size = 4
+    
+    for i in range(0, len(limited_questions), block_size):
+        block_questions = limited_questions[i:i + block_size]
+        
+        block = {
+            "block_number": len(blocks) + 1,
+            "question_range": [block_questions[0]['number'], block_questions[-1]['number']],
+            "questions": []
+        }
+        
+        for q in block_questions:
+            context_short = q['question_context'][:100] if q['question_context'] else ""
+            block["questions"].append({
+                "number": q['number'],
+                "answer": q['answer'][:100],
+                "author": q['author'],
+                "context": context_short
+            })
+        
+        blocks.append(block)
+    
+    return {
+        "status": "success",
+        "total_questions": len(all_questions),
+        "total_lines": len(lines),
+        "participants": participants[:10],
+        "blocks": blocks,
+        "filename": filename,
+        "summary": {
+            "game_info": f"Partida con {len(all_questions)} preguntas y {len(participants)} participantes",
+            "blocks_created": len(blocks),
+            "showing_range": [start_question, start_question + len(limited_questions) - 1] if limited_questions else [start_question, start_question],
+            "remaining_questions": remaining_count if remaining_count > 0 else 0
+        },
+        "processing_info": {
+            "original_length": len(raw_text),
+            "cleaned_length": len(cleaned_text),
+            "lines_processed": len(lines)
+        }
+    }
+
 @app.post("/process_file")
 async def process_file(file: UploadFile = File(...)):
-    """Endpoint que funcionó perfectamente - SIN CAMBIOS"""
+    """Endpoint original que funcionó - PRIMERA PARTE"""
     try:
-        print(f"DEBUG: Recibido archivo {file.filename}, tipo: {file.content_type}")
+        print(f"DEBUG: Recibido archivo {file.filename}")
         
-        # Leer contenido del archivo
         content = await file.read()
-        print(f"DEBUG: Archivo leído, {len(content)} bytes")
-        
-        # Intentar diferentes encodings
         raw_text = ""
         encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
         
         for encoding in encodings:
             try:
                 raw_text = content.decode(encoding, errors='ignore')
-                print(f"DEBUG: Decodificado exitosamente con {encoding}")
                 break
             except:
                 continue
         
         if not raw_text.strip():
-            return {
-                "status": "error",
-                "error": f"No se pudo leer el contenido del archivo {file.filename}"
-            }
+            return {"status": "error", "error": f"No se pudo leer {file.filename}"}
         
-        print(f"DEBUG: Texto decodificado: {len(raw_text)} caracteres")
-        
-        # Procesar - EXACTAMENTE como funcionó antes
-        cleaned_text = limpiar_log_irclog_avanzado(raw_text)
-        lines = cleaned_text.split('\\n')
-        all_questions = detect_questions_advanced(lines)
-        participants = find_participants(lines)
-        
-        print(f"DEBUG: Total preguntas detectadas: {len(all_questions)}")
-        
-        # Limitar a las primeras 12 preguntas - COMO FUNCIONÓ
-        limited_questions = all_questions[:12]
-        remaining_questions = len(all_questions) - 12
-        
-        # Crear bloques (4 preguntas por bloque) - COMO FUNCIONÓ
-        blocks = []
-        block_size = 4
-        
-        for i in range(0, len(limited_questions), block_size):
-            block_questions = limited_questions[i:i + block_size]
-            
-            block = {
-                "block_number": len(blocks) + 1,
-                "question_range": [block_questions[0]['number'], block_questions[-1]['number']],
-                "questions": []
-            }
-            
-            for q in block_questions:
-                context_short = q['question_context'][:100] if q['question_context'] else ""
-                block["questions"].append({
-                    "number": q['number'],
-                    "answer": q['answer'][:100],
-                    "author": q['author'],
-                    "context": context_short
-                })
-            
-            blocks.append(block)
-        
-        result = {
-            "status": "success",
-            "total_questions": len(all_questions),
-            "total_lines": len(lines),
-            "participants": participants[:10],
-            "blocks": blocks,
-            "filename": file.filename,
-            "summary": {
-                "game_info": f"Partida con {len(all_questions)} preguntas y {len(participants)} participantes",
-                "blocks_created": len(blocks),
-                "showing_first": len(limited_questions),
-                "remaining_questions": remaining_questions if remaining_questions > 0 else 0,
-                "next_instruction": f"Para continuar, divide el log desde la pregunta 13 en adelante y súbelo como nuevo archivo" if remaining_questions > 0 else "Log completamente procesado"
-            },
-            "processing_info": {
-                "original_length": len(raw_text),
-                "cleaned_length": len(cleaned_text),
-                "lines_processed": len(lines)
-            }
-        }
-        
+        # Usar la lógica que funcionó, desde pregunta 1
+        result = process_questions_chunk(raw_text, start_question=1, filename=file.filename)
         return result
         
     except Exception as e:
-        print(f"ERROR procesando archivo: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "status": "error",
-            "error": str(e),
-            "filename": file.filename if file else "unknown"
-        }
+        print(f"ERROR: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
+@app.post("/process_like_file")
+async def process_like_file(request: Request):
+    """Nuevo endpoint que simula process_file pero recibe texto + offset"""
+    try:
+        # CLAVE: Recibir como texto plano (sin JSON) para evitar problemas de escape
+        body = await request.body()
+        
+        # Intentar extraer parámetros de headers personalizados
+        start_question = int(request.headers.get("X-Start-Question", "1"))
+        filename = request.headers.get("X-Filename", "log_continuation.txt")
+        
+        print(f"DEBUG: process_like_file - start_question: {start_question}")
+        
+        raw_text = body.decode('utf-8', errors='ignore')
+        
+        if not raw_text.strip():
+            return {"status": "error", "error": "Contenido vacío"}
+        
+        # Usar EXACTAMENTE la misma lógica que funcionó
+        result = process_questions_chunk(raw_text, start_question=start_question, filename=filename)
+        return result
+        
+    except Exception as e:
+        print(f"ERROR en process_like_file: {str(e)}")
+        return {"status": "error", "error": str(e)}
 
 @app.get("/")
 async def root():
-    return {"message": "Trivial IRC Log Processor API v3.3 - Divide y Vencerás", "status": "running"}
+    return {"message": "Trivial IRC Log Processor API v3.4 - Método Híbrido", "status": "running"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "version": "3.3.0"}
+    return {"status": "healthy", "version": "3.4.0"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
