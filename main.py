@@ -1,13 +1,14 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import re
 import uuid
+import base64
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="8.1.0")
+app = FastAPI(title="Trivial Chunker API", version="9.0.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -18,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacenamiento de sesiones en memoria
+# Almacenamiento de sesiones
 sessions_storage = {}
 
 class SessionData:
@@ -26,19 +27,25 @@ class SessionData:
         self.session_id = session_id
         self.created_at = datetime.now()
         self.last_access = datetime.now()
-        self.raw_chunks = []
+        self.base64_chunks = []  # Chunks de base64
+        self.raw_text = ""  # Texto decodificado completo
+        self.text_chunks = []  # Chunks de texto procesado
         self.total_lines = 0
         self.processed = False
         self.questions = []
         self.metadata = {}
 
-class UploadTextRequest(BaseModel):
-    content: str  # El contenido del log como texto
+class InitBase64Request(BaseModel):
+    """Inicia una sesión y envía el primer chunk de base64"""
+    first_chunk: str  # Primer chunk de base64 (máx 50KB)
+    total_size: Optional[int] = None  # Tamaño total esperado
     filename: Optional[str] = "log.txt"
 
-class UploadBase64Request(BaseModel):
-    content_base64: str  # El contenido del log en base64
-    filename: Optional[str] = "log.txt"
+class AppendBase64Request(BaseModel):
+    """Añade más chunks de base64 a una sesión"""
+    session_id: str
+    chunk: str  # Siguiente chunk de base64
+    is_final: bool = False  # Si es el último chunk
 
 class ProcessSessionRequest(BaseModel):
     session_id: str
@@ -49,17 +56,6 @@ def clean_irc_codes(text: str) -> str:
     text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'(?:^|\s)\d+,\d+\s+', ' ', text)
     return text.strip()
-
-def split_into_chunks(text: str, chunk_size: int = 500) -> List[str]:
-    """Divide el texto en chunks de N líneas"""
-    lines = text.split('\n')
-    chunks = []
-    
-    for i in range(0, len(lines), chunk_size):
-        chunk = '\n'.join(lines[i:i + chunk_size])
-        chunks.append(chunk)
-    
-    return chunks
 
 def extract_questions_from_text(text: str) -> List[Dict]:
     """Extrae todas las preguntas del texto"""
@@ -83,7 +79,7 @@ def extract_questions_from_text(text: str) -> List[Dict]:
                 'pregunta': '',
                 'ganador': '',
                 'respuesta': '',
-                'tiempo_respuesta': '',
+                'tiempo': '',
                 'participantes': []
             }
             continue
@@ -110,19 +106,14 @@ def extract_questions_from_text(text: str) -> List[Dict]:
                     ganador_match = re.search(r'>>>(\w+)', clean_line)
                     if ganador_match:
                         current_q['ganador'] = ganador_match.group(1)
-                        tiempo_match = re.search(r'(\d+)[\'"](\d+)', clean_line)
-                        if tiempo_match:
-                            current_q['tiempo_respuesta'] = f"{tiempo_match.group(1)}.{tiempo_match.group(2)}s"
             
             # Detectar participantes
             if '>>>' in clean_line:
                 player_match = re.search(r'>>>(\w+)', clean_line)
-                if player_match:
-                    player = player_match.group(1)
-                    if player not in current_q['participantes']:
-                        current_q['participantes'].append(player)
+                if player_match and player_match.group(1) not in current_q['participantes']:
+                    current_q['participantes'].append(player_match.group(1))
             
-            # Detectar respuesta correcta
+            # Detectar respuesta
             if 'La buena:' in clean_line or 'Las buenas:' in clean_line:
                 respuesta_match = re.search(r'(?:La buena:|Las buenas:)\s*([^]+?)(?:Mandada por:|$)', clean_line)
                 if respuesta_match:
@@ -133,177 +124,41 @@ def extract_questions_from_text(text: str) -> List[Dict]:
     
     return questions
 
-@app.post("/upload_base64_log")
-async def upload_base64_log(request: UploadBase64Request):
-    """
-    Endpoint alternativo: Recibe el log codificado en base64 (evita problemas de caracteres)
-    """
+@app.post("/init_base64_session")
+async def init_base64_session(request: InitBase64Request):
+    """Inicia una sesión nueva y recibe el primer chunk de base64"""
     try:
-        import base64
-        
-        # Decodificar base64
-        try:
-            content_bytes = base64.b64decode(request.content_base64)
-            text = content_bytes.decode('utf-8', errors='ignore')
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error decodificando base64: {str(e)}")
-        
-        if not text:
-            raise HTTPException(status_code=400, detail="Contenido vacío después de decodificar")
-        
-        # Limpiar el texto de códigos IRC
-        text = clean_irc_codes(text)
-        
-        # Generar session_id único
+        # Generar session_id
         session_id = str(uuid.uuid4())[:8]
         
         # Crear sesión
         session = SessionData(session_id)
-        
-        # Dividir en chunks de 500 líneas
-        chunks = split_into_chunks(text, chunk_size=500)
-        session.raw_chunks = chunks
-        session.total_lines = len(text.split('\n'))
-        
-        # Detección rápida de preguntas
-        estimated_questions = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', text))
-        
-        # Guardar metadatos
+        session.base64_chunks.append(request.first_chunk)
         session.metadata = {
             'filename': request.filename,
-            'size_bytes': len(text),
-            'total_chunks': len(chunks),
-            'estimated_questions': estimated_questions
+            'total_size': request.total_size,
+            'chunks_received': 1
         }
         
-        # Almacenar sesión
+        # Guardar sesión
         sessions_storage[session_id] = session
         
-        # Limpiar sesiones antiguas
+        # Limpiar sesiones viejas
         cleanup_old_sessions()
         
         return JSONResponse({
             "session_id": session_id,
-            "total_lines": session.total_lines,
-            "total_chunks": len(chunks),
-            "estimated_questions": estimated_questions,
-            "message": f"Log decodificado y troceado en {len(chunks)} chunks.",
-            "next_step": f"Usa POST /process_session con session_id: {session_id}"
-        })
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando: {str(e)[:200]}")
-
-@app.post("/upload_text_log")
-async def upload_text_log(request: UploadTextRequest):
-    """
-    Endpoint para ChatGPT: Recibe el log como texto plano
-    """
-    try:
-        text = request.content
-        
-        if not text:
-            raise HTTPException(status_code=400, detail="Contenido vacío")
-        
-        # Limpiar el texto de códigos IRC
-        text = clean_irc_codes(text)
-        
-        # Generar session_id único
-        session_id = str(uuid.uuid4())[:8]
-        
-        # Crear sesión
-        session = SessionData(session_id)
-        
-        # Dividir en chunks de 500 líneas
-        chunks = split_into_chunks(text, chunk_size=500)
-        session.raw_chunks = chunks
-        session.total_lines = len(text.split('\n'))
-        
-        # Detección rápida de preguntas
-        estimated_questions = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', text))
-        
-        # Guardar metadatos
-        session.metadata = {
-            'filename': request.filename,
-            'size_bytes': len(text),
-            'total_chunks': len(chunks),
-            'estimated_questions': estimated_questions
-        }
-        
-        # Almacenar sesión
-        sessions_storage[session_id] = session
-        
-        # Limpiar sesiones antiguas
-        cleanup_old_sessions()
-        
-        return JSONResponse({
-            "session_id": session_id,
-            "total_lines": session.total_lines,
-            "total_chunks": len(chunks),
-            "estimated_questions": estimated_questions,
-            "message": f"Log recibido y troceado en {len(chunks)} chunks.",
-            "next_step": f"Usa POST /process_session con session_id: {session_id}"
+            "chunks_received": 1,
+            "message": "Sesión iniciada. Envía más chunks con /append_base64",
+            "next_step": f"POST /append_base64 con session_id: {session_id}"
         })
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)[:200]}")
 
-@app.post("/upload_full_log")
-async def upload_full_log(file: UploadFile = File(...)):
-    """
-    Endpoint para pruebas locales con archivo real (NO funciona desde ChatGPT)
-    """
-    try:
-        content = await file.read()
-        
-        text = None
-        for encoding in ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']:
-            try:
-                text = content.decode(encoding)
-                break
-            except:
-                continue
-        
-        if not text:
-            raise HTTPException(status_code=400, detail="No se pudo decodificar")
-        
-        # Usar la misma lógica que upload_text_log
-        text = clean_irc_codes(text)
-        session_id = str(uuid.uuid4())[:8]
-        session = SessionData(session_id)
-        
-        chunks = split_into_chunks(text, chunk_size=500)
-        session.raw_chunks = chunks
-        session.total_lines = len(text.split('\n'))
-        estimated_questions = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', text))
-        
-        session.metadata = {
-            'filename': file.filename,
-            'size_bytes': len(content),
-            'total_chunks': len(chunks),
-            'estimated_questions': estimated_questions
-        }
-        
-        sessions_storage[session_id] = session
-        cleanup_old_sessions()
-        
-        return JSONResponse({
-            "session_id": session_id,
-            "total_lines": session.total_lines,
-            "total_chunks": len(chunks),
-            "estimated_questions": estimated_questions,
-            "message": f"Archivo procesado: {len(chunks)} chunks.",
-            "next_step": f"Usa POST /process_session con session_id: {session_id}"
-        })
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@app.post("/process_session")
-async def process_session(request: ProcessSessionRequest):
-    """Procesa todos los chunks de una sesión"""
+@app.post("/append_base64")
+async def append_base64(request: AppendBase64Request):
+    """Añade más chunks de base64 a una sesión existente"""
     if request.session_id not in sessions_storage:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     
@@ -311,37 +166,105 @@ async def process_session(request: ProcessSessionRequest):
         session = sessions_storage[request.session_id]
         session.last_access = datetime.now()
         
-        full_text = '\n'.join(session.raw_chunks)
-        session.questions = extract_questions_from_text(full_text)
+        # Añadir chunk
+        session.base64_chunks.append(request.chunk)
+        session.metadata['chunks_received'] += 1
+        
+        response = {
+            "session_id": request.session_id,
+            "chunks_received": session.metadata['chunks_received'],
+            "message": "Chunk añadido"
+        }
+        
+        # Si es el último chunk, decodificar todo
+        if request.is_final:
+            try:
+                # Unir todos los chunks
+                full_base64 = ''.join(session.base64_chunks)
+                
+                # Decodificar
+                content_bytes = base64.b64decode(full_base64)
+                session.raw_text = content_bytes.decode('utf-8', errors='ignore')
+                
+                # Limpiar
+                session.raw_text = clean_irc_codes(session.raw_text)
+                session.total_lines = len(session.raw_text.split('\n'))
+                
+                # Estimar preguntas
+                estimated = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', session.raw_text))
+                
+                response.update({
+                    "message": "Todos los chunks recibidos y decodificados",
+                    "total_lines": session.total_lines,
+                    "estimated_questions": estimated,
+                    "next_step": f"POST /process_session con session_id: {request.session_id}"
+                })
+                
+                # Liberar memoria de chunks base64
+                session.base64_chunks = []
+                
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error decodificando: {str(e)}")
+        else:
+            response["next_step"] = "Continúa enviando chunks con /append_base64"
+        
+        return JSONResponse(response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)[:200]}")
+
+@app.post("/process_session")
+async def process_session(request: ProcessSessionRequest):
+    """Procesa el texto completo y extrae las preguntas"""
+    if request.session_id not in sessions_storage:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
+    session = sessions_storage[request.session_id]
+    
+    if not session.raw_text:
+        raise HTTPException(status_code=400, detail="No hay texto para procesar. Asegúrate de enviar todos los chunks primero")
+    
+    try:
+        session.last_access = datetime.now()
+        
+        # Extraer preguntas
+        session.questions = extract_questions_from_text(session.raw_text)
         session.processed = True
         
+        # Estadísticas
         categories_count = {}
         for q in session.questions:
             if q['categoria']:
                 categories_count[q['categoria']] = categories_count.get(q['categoria'], 0) + 1
         
-        equipos = detectar_equipos(full_text)
+        # Detectar equipos
+        equipos = []
+        if 'FOGUETES' in session.raw_text[:2000]:
+            equipos.append('FOGUETES')
+        if 'LIDERES' in session.raw_text[:2000] or 'LÍDERES' in session.raw_text[:2000]:
+            equipos.append('LIDERES')
         
         return JSONResponse({
             "session_id": request.session_id,
             "total_questions": len(session.questions),
             "categories": categories_count,
             "equipos": equipos,
-            "message": f"Procesadas {len(session.questions)} preguntas.",
+            "message": f"Procesadas {len(session.questions)} preguntas",
             "next_step": f"GET /get_questions/{request.session_id}/1/5"
         })
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error procesando: {str(e)[:200]}")
 
 @app.get("/get_questions/{session_id}/{start}/{end}")
 async def get_questions(session_id: str, start: int, end: int):
-    """Devuelve un rango de preguntas procesadas"""
+    """Devuelve un rango de preguntas"""
     if session_id not in sessions_storage:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     
     session = sessions_storage[session_id]
-    session.last_access = datetime.now()
     
     if not session.processed:
         raise HTTPException(status_code=400, detail="Sesión no procesada")
@@ -360,47 +283,11 @@ async def get_questions(session_id: str, start: int, end: int):
         "next_range": f"{end_idx + 1}-{min(end_idx + 5, len(session.questions))}" if end_idx < len(session.questions) else None
     })
 
-@app.get("/get_summary/{session_id}")
-async def get_summary(session_id: str):
-    """Resumen de la partida"""
-    if session_id not in sessions_storage:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    
-    session = sessions_storage[session_id]
-    
-    if not session.processed:
-        raise HTTPException(status_code=400, detail="Sesión no procesada")
-    
-    ganadores_count = {}
-    for q in session.questions:
-        if q['ganador']:
-            ganadores_count[q['ganador']] = ganadores_count.get(q['ganador'], 0) + 1
-    
-    top_players = sorted(ganadores_count.items(), key=lambda x: x[1], reverse=True)[:3]
-    
-    return JSONResponse({
-        "session_id": session_id,
-        "total_questions": len(session.questions),
-        "top_players": [{"player": p[0], "correct_answers": p[1]} for p in top_players],
-        "metadata": session.metadata
-    })
-
-def detectar_equipos(text: str) -> List[str]:
-    """Detecta equipos participantes"""
-    equipos = []
-    
-    if 'FOGUETES' in text[:2000]:
-        equipos.append('FOGUETES')
-    if 'LIDERES' in text[:2000] or 'LÍDERES' in text[:2000]:
-        equipos.append('LIDERES')
-    
-    return equipos
-
 def cleanup_old_sessions():
     """Limpia sesiones de más de 2 horas"""
     cutoff = datetime.now() - timedelta(hours=2)
-    expired = [sid for sid, session in sessions_storage.items() 
-              if session.created_at < cutoff]
+    expired = [sid for sid, s in sessions_storage.items() 
+              if s.created_at < cutoff]
     for sid in expired:
         del sessions_storage[sid]
 
@@ -408,30 +295,19 @@ def cleanup_old_sessions():
 async def root():
     return {
         "service": "Trivial Chunker API",
-        "version": "8.1.0",
+        "version": "9.0.0",
         "status": "active",
-        "active_sessions": len(sessions_storage),
+        "sessions": len(sessions_storage),
         "endpoints": {
-            "for_chatgpt": [
-                "POST /upload_base64_log - Sube log en base64 (RECOMENDADO)",
-                "POST /upload_text_log - Sube log como texto",
-                "POST /process_session - Procesa sesión",
-                "GET /get_questions/{id}/{start}/{end} - Obtiene preguntas",
-                "GET /get_summary/{id} - Resumen"
-            ],
-            "for_testing": [
-                "POST /upload_full_log - Sube archivo (solo pruebas)"
+            "base64_chunked": [
+                "POST /init_base64_session - Inicia sesión con primer chunk",
+                "POST /append_base64 - Añade más chunks base64",
+                "POST /process_session - Procesa el texto completo",
+                "GET /get_questions/{id}/{start}/{end} - Obtiene preguntas"
             ]
         }
     }
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy",
-        "sessions": len(sessions_storage),
-        "memory_mb": sum(
-            sum(len(chunk) for chunk in s.raw_chunks) 
-            for s in sessions_storage.values()
-        ) / (1024 * 1024)
-    }
+    return {"status": "healthy", "sessions": len(sessions_storage)}
