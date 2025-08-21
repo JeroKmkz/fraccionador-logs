@@ -61,15 +61,31 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
     all_questions = []
     current_q = None
     
-    for line in lines:
+    for i, line in enumerate(lines):
+        # Primero limpiamos la línea
         clean_line = clean_irc_codes(line)
         
-        # Detectar nueva pregunta
-        pregunta_match = re.search(r'Pregunta:\s*(\d+)\s*/\s*(\d+)', clean_line)
+        # Detectar nueva pregunta - PATRÓN MEJORADO
+        # Busca variaciones como "Pregunta: 1 / 35" o similares
+        pregunta_patterns = [
+            r'Pregunta:\s*(\d+)\s*/\s*(\d+)',
+            r'Pregunta\s*:\s*(\d+)\s*/\s*(\d+)',
+            r'Pregunta\s+(\d+)\s*/\s*(\d+)',
+            r'pregunta:\s*(\d+)\s*/\s*(\d+)'
+        ]
+        
+        pregunta_match = None
+        for pattern in pregunta_patterns:
+            pregunta_match = re.search(pattern, clean_line, re.IGNORECASE)
+            if pregunta_match:
+                break
+        
         if pregunta_match:
+            # Guardar pregunta anterior si existe
             if current_q and current_q.get('pregunta'):
                 all_questions.append(current_q)
             
+            # Iniciar nueva pregunta
             current_q = {
                 'numero': int(pregunta_match.group(1)),
                 'total': int(pregunta_match.group(2)),
@@ -78,55 +94,101 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
                 'ganador': '',
                 'respuesta': '',
                 'tiempo': '',
-                'participantes': []
+                'participantes': [],
+                'linea_inicio': i
             }
             continue
             
         if current_q:
-            # Detectar categoría
-            categorias = ['MEDICINA-SALUD', 'GASTRONOMÍA', 'INFORMÁTICA', 'DEPORTE', 
-                         'HISTORIA', 'GEOGRAFÍA', 'CIENCIAS', 'ARTE', 'CINE', 'MÚSICA',
-                         'LITERATURA', 'TELEVISIÓN', 'POLÍTICA', 'ECONOMÍA', 'MISCELÁNEA']
+            # Detectar categoría y texto de la pregunta
+            categorias = [
+                'MEDICINA-SALUD', 'MEDICINA', 'SALUD',
+                'GASTRONOMÍA', 'GASTRONOMIA',
+                'INFORMÁTICA', 'INFORMATICA', 'TECNOLOGÍA', 'TECNOLOGIA',
+                'DEPORTE', 'DEPORTES', 'FÚTBOL', 'FUTBOL',
+                'HISTORIA', 'GEOGRAFÍA', 'GEOGRAFIA',
+                'CIENCIAS', 'CIENCIA', 'FÍSICA', 'FISICA', 'QUÍMICA', 'QUIMICA',
+                'ARTE', 'CINE', 'MÚSICA', 'MUSICA',
+                'LITERATURA', 'TELEVISIÓN', 'TELEVISION', 'TV',
+                'POLÍTICA', 'POLITICA', 'ECONOMÍA', 'ECONOMIA',
+                'MISCELÁNEA', 'MISCELANEA', 'CULTURA'
+            ]
             
-            for cat in categorias:
-                if cat in clean_line.upper() and not current_q['categoria']:
-                    current_q['categoria'] = cat
-                    # Extraer pregunta
-                    parts = re.split(cat, clean_line.upper())
-                    if len(parts) > 1:
-                        pregunta_text = clean_line[clean_line.upper().find(cat) + len(cat):]
-                        pregunta_text = re.sub(r'\([^)]*palabras?\)', '', pregunta_text)
-                        current_q['pregunta'] = pregunta_text.strip()
-                    break
+            # Si encontramos una categoría y aún no tenemos pregunta
+            if not current_q['pregunta']:
+                for cat in categorias:
+                    if cat in clean_line.upper():
+                        current_q['categoria'] = cat
+                        # El texto de la pregunta suele estar después de la categoría
+                        # Buscar el texto después de la categoría
+                        idx = clean_line.upper().find(cat)
+                        if idx != -1:
+                            pregunta_text = clean_line[idx + len(cat):]
+                            # Limpiar indicadores de palabras
+                            pregunta_text = re.sub(r'\([^)]*palabras?\)', '', pregunta_text)
+                            pregunta_text = re.sub(r'^\s*[-:]\s*', '', pregunta_text)
+                            pregunta_text = pregunta_text.strip()
+                            if pregunta_text and len(pregunta_text) > 5:  # Solo si hay contenido real
+                                current_q['pregunta'] = pregunta_text
+                                break
             
-            # Detectar ganador
-            if '>>>' in clean_line and not current_q['ganador']:
-                if 'scratchea' not in clean_line.lower() and ' a ' in clean_line:
-                    ganador_match = re.search(r'>>>(\w+)', clean_line)
-                    if ganador_match:
+            # Detectar ganador (cuando alguien acierta)
+            if '>>>' in line:  # Usar línea original para detectar >>>
+                # Patrón típico: ">>>JUGADOR a 01''23" o ">>>JUGADOR scratchea"
+                if 'scratchea' not in line.lower():
+                    ganador_match = re.search(r'>>>(\w+)', line)
+                    if ganador_match and not current_q['ganador']:
                         current_q['ganador'] = ganador_match.group(1)
-                        # Extraer tiempo
-                        tiempo_match = re.search(r'(\d+)[\'"](\d+)', clean_line)
+                        # Intentar extraer tiempo
+                        tiempo_match = re.search(r'(\d+)[\'"`](\d+)', line)
                         if tiempo_match:
                             current_q['tiempo'] = f"{tiempo_match.group(1)}.{tiempo_match.group(2)}s"
-            
-            # Detectar participantes
-            if '>>>' in clean_line:
-                player_match = re.search(r'>>>(\w+)', clean_line)
+                
+                # Añadir a participantes
+                player_match = re.search(r'>>>(\w+)', line)
                 if player_match:
                     player = player_match.group(1)
                     if player not in current_q['participantes']:
                         current_q['participantes'].append(player)
             
-            # Detectar respuesta
-            if 'La buena:' in clean_line or 'Las buenas:' in clean_line:
-                respuesta_match = re.search(r'(?:La buena:|Las buenas:)\s*([^]+?)(?:Mandada por:|$)', clean_line)
+            # Detectar respuesta correcta
+            respuesta_patterns = [
+                r'La buena:\s*([^]+?)(?:Mandada por:|$)',
+                r'Las buenas:\s*([^]+?)(?:Mandada por:|$)',
+                r'Respuesta correcta:\s*([^]+?)(?:Mandada por:|$)',
+                r'La respuesta es:\s*([^]+?)(?:Mandada por:|$)'
+            ]
+            
+            for pattern in respuesta_patterns:
+                respuesta_match = re.search(pattern, clean_line, re.IGNORECASE)
                 if respuesta_match:
                     current_q['respuesta'] = respuesta_match.group(1).strip()
+                    break
     
-    # Añadir última pregunta
+    # Añadir última pregunta si existe
     if current_q and current_q.get('pregunta'):
         all_questions.append(current_q)
+    
+    # Si no encontramos preguntas con el método anterior, intentar método alternativo
+    if len(all_questions) == 0:
+        # Buscar cualquier línea que contenga "Pregunta" y un número
+        for i, line in enumerate(lines):
+            if 'pregunta' in line.lower() and re.search(r'\d+\s*/\s*\d+', line):
+                # Extraer información básica
+                nums = re.search(r'(\d+)\s*/\s*(\d+)', line)
+                if nums:
+                    q = {
+                        'numero': int(nums.group(1)),
+                        'total': int(nums.group(2)),
+                        'categoria': 'DESCONOCIDA',
+                        'pregunta': f'Pregunta {nums.group(1)}',
+                        'ganador': '',
+                        'respuesta': '',
+                        'tiempo': '',
+                        'participantes': [],
+                        'linea': i
+                    }
+                    all_questions.append(q)
     
     # Dividir en bloques
     blocks = []
@@ -289,6 +351,45 @@ def cleanup_old_sessions():
               if s.created_at < cutoff]
     for sid in expired:
         del sessions_storage[sid]
+
+@app.get("/debug_session/{session_id}")
+async def debug_session(session_id: str):
+    """
+    Endpoint de DEBUG para ver qué está pasando con el texto
+    """
+    if session_id not in sessions_storage:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    
+    session = sessions_storage[session_id]
+    
+    # Buscar líneas que parezcan preguntas
+    lines = session.full_text.split('\n')
+    potential_questions = []
+    
+    for i, line in enumerate(lines[:100]):  # Primeras 100 líneas
+        if 'pregunta' in line.lower() or '>>>' in line or 'buena:' in line.lower():
+            potential_questions.append({
+                'line_num': i,
+                'content': line[:100]  # Primeros 100 chars
+            })
+    
+    # Buscar patrones específicos
+    pregunta_count = len(re.findall(r'Pregunta[:\s]+\d+\s*/\s*\d+', session.full_text, re.IGNORECASE))
+    categoria_count = len(re.findall(r'(MEDICINA|GASTRONOMÍA|DEPORTE|HISTORIA)', session.full_text, re.IGNORECASE))
+    
+    return JSONResponse({
+        "session_id": session_id,
+        "total_lines": len(lines),
+        "first_10_lines": lines[:10],
+        "potential_questions": potential_questions[:20],
+        "pattern_counts": {
+            "pregunta_pattern": pregunta_count,
+            "categoria_pattern": categoria_count,
+            ">>> marks": session.full_text.count('>>>'),
+            "La buena": session.full_text.count('La buena')
+        },
+        "text_sample": session.full_text[:500]
+    })
 
 @app.get("/")
 async def root():
