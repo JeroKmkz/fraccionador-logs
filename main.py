@@ -103,7 +103,17 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
 async def upload_complete_log(request: UploadLogRequest):
     try:
         # 🔥 NUEVO: decodificar base64 y descomprimir con gzip
-        decoded = base64.b64decode(request.content_base64)
+        import binascii
+
+try:
+    decoded = base64.b64decode(request.content_base64, validate=False)
+except binascii.Error:
+    # Añadir padding si falta
+    missing_padding = len(request.content_base64) % 4
+    if missing_padding:
+        request.content_base64 += '=' * (4 - missing_padding)
+    decoded = base64.b64decode(request.content_base64)
+
         with gzip.GzipFile(fileobj=io.BytesIO(decoded), mode='rb') as f:
             content_bytes = f.read()
         text = content_bytes.decode('utf-8', errors='ignore')
@@ -190,4 +200,5 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy", "sessions": len(sessions_storage)}
+
 
