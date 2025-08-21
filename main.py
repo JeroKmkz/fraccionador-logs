@@ -7,10 +7,11 @@ import uuid
 import base64
 import gzip
 import io
+import binascii
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="11.1.0")
+app = FastAPI(title="Trivial Chunker API", version="11.2.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -21,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Almacenamiento de sesiones
+# Almacenamiento en memoria
 sessions_storage = {}
 
 class SessionData:
@@ -40,7 +41,6 @@ class UploadLogRequest(BaseModel):
     filename: Optional[str] = "log.txt"
 
 def clean_irc_codes(text: str) -> str:
-    """Limpia colores, timestamps y nicks"""
     text = re.sub(r'\x03\d{0,2}(?:,\d{1,2})?', '', text)
     text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', text)
     text = re.sub(r'^\d{2}:\d{2}:\d{2}.*?>\s*', '', text, flags=re.MULTILINE)
@@ -102,18 +102,15 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
 @app.post("/upload_complete_log")
 async def upload_complete_log(request: UploadLogRequest):
     try:
-        # 🔥 NUEVO: decodificar base64 y descomprimir con gzip
-        import binascii
-
-try:
-    decoded = base64.b64decode(request.content_base64, validate=False)
-except binascii.Error:
-    # Añadir padding si falta
-    missing_padding = len(request.content_base64) % 4
-    if missing_padding:
-        request.content_base64 += '=' * (4 - missing_padding)
-    decoded = base64.b64decode(request.content_base64)
-
+        # 🔥 NUEVO: decodificación robusta base64 + gzip
+        try:
+            decoded = base64.b64decode(request.content_base64, validate=False)
+        except binascii.Error:
+            missing_padding = len(request.content_base64) % 4
+            if missing_padding:
+                request.content_base64 += '=' * (4 - missing_padding)
+            decoded = base64.b64decode(request.content_base64)
+        
         with gzip.GzipFile(fileobj=io.BytesIO(decoded), mode='rb') as f:
             content_bytes = f.read()
         text = content_bytes.decode('utf-8', errors='ignore')
@@ -195,10 +192,9 @@ async def debug_session(session_id: str):
 
 @app.get("/")
 async def root():
-    return {"service": "Trivial Chunker API", "version": "11.1.0", "status": "active"}
+    return {"service": "Trivial Chunker API", "version": "11.2.0", "status": "active"}
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "sessions": len(sessions_storage)}
-
 
