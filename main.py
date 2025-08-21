@@ -36,6 +36,10 @@ class UploadTextRequest(BaseModel):
     content: str  # El contenido del log como texto
     filename: Optional[str] = "log.txt"
 
+class UploadBase64Request(BaseModel):
+    content_base64: str  # El contenido del log en base64
+    filename: Optional[str] = "log.txt"
+
 class ProcessSessionRequest(BaseModel):
     session_id: str
 
@@ -128,6 +132,69 @@ def extract_questions_from_text(text: str) -> List[Dict]:
         questions.append(current_q)
     
     return questions
+
+@app.post("/upload_base64_log")
+async def upload_base64_log(request: UploadBase64Request):
+    """
+    Endpoint alternativo: Recibe el log codificado en base64 (evita problemas de caracteres)
+    """
+    try:
+        import base64
+        
+        # Decodificar base64
+        try:
+            content_bytes = base64.b64decode(request.content_base64)
+            text = content_bytes.decode('utf-8', errors='ignore')
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error decodificando base64: {str(e)}")
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="Contenido vacío después de decodificar")
+        
+        # Limpiar el texto de códigos IRC
+        text = clean_irc_codes(text)
+        
+        # Generar session_id único
+        session_id = str(uuid.uuid4())[:8]
+        
+        # Crear sesión
+        session = SessionData(session_id)
+        
+        # Dividir en chunks de 500 líneas
+        chunks = split_into_chunks(text, chunk_size=500)
+        session.raw_chunks = chunks
+        session.total_lines = len(text.split('\n'))
+        
+        # Detección rápida de preguntas
+        estimated_questions = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', text))
+        
+        # Guardar metadatos
+        session.metadata = {
+            'filename': request.filename,
+            'size_bytes': len(text),
+            'total_chunks': len(chunks),
+            'estimated_questions': estimated_questions
+        }
+        
+        # Almacenar sesión
+        sessions_storage[session_id] = session
+        
+        # Limpiar sesiones antiguas
+        cleanup_old_sessions()
+        
+        return JSONResponse({
+            "session_id": session_id,
+            "total_lines": session.total_lines,
+            "total_chunks": len(chunks),
+            "estimated_questions": estimated_questions,
+            "message": f"Log decodificado y troceado en {len(chunks)} chunks.",
+            "next_step": f"Usa POST /process_session con session_id: {session_id}"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error procesando: {str(e)[:200]}")
 
 @app.post("/upload_text_log")
 async def upload_text_log(request: UploadTextRequest):
@@ -346,6 +413,7 @@ async def root():
         "active_sessions": len(sessions_storage),
         "endpoints": {
             "for_chatgpt": [
+                "POST /upload_base64_log - Sube log en base64 (RECOMENDADO)",
                 "POST /upload_text_log - Sube log como texto",
                 "POST /process_session - Procesa sesión",
                 "GET /get_questions/{id}/{start}/{end} - Obtiene preguntas",
