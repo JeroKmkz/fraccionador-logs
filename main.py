@@ -8,7 +8,7 @@ import base64
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="9.0.0")
+app = FastAPI(title="Trivial Chunker API", version="10.0.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -27,50 +27,48 @@ class SessionData:
         self.session_id = session_id
         self.created_at = datetime.now()
         self.last_access = datetime.now()
-        self.base64_chunks = []  # Chunks de base64
-        self.raw_text = ""  # Texto decodificado completo
-        self.text_chunks = []  # Chunks de texto procesado
-        self.total_lines = 0
-        self.processed = False
-        self.questions = []
+        self.full_text = ""  # Texto completo limpio
+        self.question_blocks = []  # Bloques de 5 preguntas cada uno
+        self.total_questions = 0
         self.metadata = {}
+        self.processed = False
 
-class InitBase64Request(BaseModel):
-    """Inicia una sesión y envía el primer chunk de base64"""
-    first_chunk: str  # Primer chunk de base64 (máx 50KB)
-    total_size: Optional[int] = None  # Tamaño total esperado
+class UploadLogRequest(BaseModel):
+    """Recibe el log completo en base64"""
+    content_base64: str
     filename: Optional[str] = "log.txt"
 
-class AppendBase64Request(BaseModel):
-    """Añade más chunks de base64 a una sesión"""
+class GetBlockRequest(BaseModel):
+    """Solicita un bloque específico de preguntas"""
     session_id: str
-    chunk: str  # Siguiente chunk de base64
-    is_final: bool = False  # Si es el último chunk
-
-class ProcessSessionRequest(BaseModel):
-    session_id: str
+    block_number: int  # 1, 2, 3, etc.
 
 def clean_irc_codes(text: str) -> str:
     """Limpia códigos IRC del texto"""
+    # Eliminar códigos de color IRC
     text = re.sub(r'\x03\d{0,2}(?:,\d{1,2})?', '', text)
+    # Eliminar otros códigos de control
     text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', text)
+    # Limpiar patrones numéricos de color
     text = re.sub(r'(?:^|\s)\d+,\d+\s+', ' ', text)
     return text.strip()
 
-def extract_questions_from_text(text: str) -> List[Dict]:
-    """Extrae todas las preguntas del texto"""
+def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List[List[Dict]]:
+    """
+    Extrae todas las preguntas y las divide en bloques de N preguntas
+    """
     lines = text.split('\n')
-    questions = []
+    all_questions = []
     current_q = None
     
-    for i, line in enumerate(lines):
+    for line in lines:
         clean_line = clean_irc_codes(line)
         
         # Detectar nueva pregunta
         pregunta_match = re.search(r'Pregunta:\s*(\d+)\s*/\s*(\d+)', clean_line)
         if pregunta_match:
             if current_q and current_q.get('pregunta'):
-                questions.append(current_q)
+                all_questions.append(current_q)
             
             current_q = {
                 'numero': int(pregunta_match.group(1)),
@@ -85,7 +83,7 @@ def extract_questions_from_text(text: str) -> List[Dict]:
             continue
             
         if current_q:
-            # Detectar categoría y pregunta
+            # Detectar categoría
             categorias = ['MEDICINA-SALUD', 'GASTRONOMÍA', 'INFORMÁTICA', 'DEPORTE', 
                          'HISTORIA', 'GEOGRAFÍA', 'CIENCIAS', 'ARTE', 'CINE', 'MÚSICA',
                          'LITERATURA', 'TELEVISIÓN', 'POLÍTICA', 'ECONOMÍA', 'MISCELÁNEA']
@@ -93,6 +91,7 @@ def extract_questions_from_text(text: str) -> List[Dict]:
             for cat in categorias:
                 if cat in clean_line.upper() and not current_q['categoria']:
                     current_q['categoria'] = cat
+                    # Extraer pregunta
                     parts = re.split(cat, clean_line.upper())
                     if len(parts) > 1:
                         pregunta_text = clean_line[clean_line.upper().find(cat) + len(cat):]
@@ -106,12 +105,18 @@ def extract_questions_from_text(text: str) -> List[Dict]:
                     ganador_match = re.search(r'>>>(\w+)', clean_line)
                     if ganador_match:
                         current_q['ganador'] = ganador_match.group(1)
+                        # Extraer tiempo
+                        tiempo_match = re.search(r'(\d+)[\'"](\d+)', clean_line)
+                        if tiempo_match:
+                            current_q['tiempo'] = f"{tiempo_match.group(1)}.{tiempo_match.group(2)}s"
             
             # Detectar participantes
             if '>>>' in clean_line:
                 player_match = re.search(r'>>>(\w+)', clean_line)
-                if player_match and player_match.group(1) not in current_q['participantes']:
-                    current_q['participantes'].append(player_match.group(1))
+                if player_match:
+                    player = player_match.group(1)
+                    if player not in current_q['participantes']:
+                        current_q['participantes'].append(player)
             
             # Detectar respuesta
             if 'La buena:' in clean_line or 'Las buenas:' in clean_line:
@@ -119,26 +124,65 @@ def extract_questions_from_text(text: str) -> List[Dict]:
                 if respuesta_match:
                     current_q['respuesta'] = respuesta_match.group(1).strip()
     
+    # Añadir última pregunta
     if current_q and current_q.get('pregunta'):
-        questions.append(current_q)
+        all_questions.append(current_q)
     
-    return questions
+    # Dividir en bloques
+    blocks = []
+    for i in range(0, len(all_questions), questions_per_block):
+        blocks.append(all_questions[i:i + questions_per_block])
+    
+    return blocks
 
-@app.post("/init_base64_session")
-async def init_base64_session(request: InitBase64Request):
-    """Inicia una sesión nueva y recibe el primer chunk de base64"""
+@app.post("/upload_complete_log")
+async def upload_complete_log(request: UploadLogRequest):
+    """
+    PASO 1: Recibe el log completo, lo procesa y lo trocea en bloques
+    El servidor hace todo el trabajo pesado
+    """
     try:
+        # Decodificar base64
+        try:
+            content_bytes = base64.b64decode(request.content_base64)
+            text = content_bytes.decode('utf-8', errors='ignore')
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error decodificando base64: {str(e)}")
+        
+        if not text:
+            raise HTTPException(status_code=400, detail="Contenido vacío")
+        
+        # Limpiar códigos IRC
+        text = clean_irc_codes(text)
+        
         # Generar session_id
         session_id = str(uuid.uuid4())[:8]
         
         # Crear sesión
         session = SessionData(session_id)
-        session.base64_chunks.append(request.first_chunk)
+        session.full_text = text
+        
+        # Extraer y trocear preguntas en bloques de 5
+        session.question_blocks = extract_and_chunk_questions(text, questions_per_block=5)
+        session.total_questions = sum(len(block) for block in session.question_blocks)
+        session.processed = True
+        
+        # Metadatos
         session.metadata = {
             'filename': request.filename,
-            'total_size': request.total_size,
-            'chunks_received': 1
+            'total_lines': len(text.split('\n')),
+            'total_blocks': len(session.question_blocks),
+            'questions_per_block': 5,
+            'size_bytes': len(content_bytes)
         }
+        
+        # Detectar equipos
+        equipos = []
+        if 'FOGUETES' in text[:3000]:
+            equipos.append('FOGUETES')
+        if 'LIDERES' in text[:3000] or 'LÍDERES' in text[:3000]:
+            equipos.append('LIDERES')
+        session.metadata['equipos'] = equipos
         
         # Guardar sesión
         sessions_storage[session_id] = session
@@ -148,144 +192,99 @@ async def init_base64_session(request: InitBase64Request):
         
         return JSONResponse({
             "session_id": session_id,
-            "chunks_received": 1,
-            "message": "Sesión iniciada. Envía más chunks con /append_base64",
-            "next_step": f"POST /append_base64 con session_id: {session_id}"
+            "status": "success",
+            "total_questions": session.total_questions,
+            "total_blocks": len(session.question_blocks),
+            "questions_per_block": 5,
+            "equipos": equipos,
+            "message": f"Log procesado y dividido en {len(session.question_blocks)} bloques de 5 preguntas",
+            "instructions": "Usa /get_block/{session_id}/1 para obtener el primer bloque, /get_block/{session_id}/2 para el segundo, etc."
         })
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)[:200]}")
-
-@app.post("/append_base64")
-async def append_base64(request: AppendBase64Request):
-    """Añade más chunks de base64 a una sesión existente"""
-    if request.session_id not in sessions_storage:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    
-    try:
-        session = sessions_storage[request.session_id]
-        session.last_access = datetime.now()
-        
-        # Añadir chunk
-        session.base64_chunks.append(request.chunk)
-        session.metadata['chunks_received'] += 1
-        
-        response = {
-            "session_id": request.session_id,
-            "chunks_received": session.metadata['chunks_received'],
-            "message": "Chunk añadido"
-        }
-        
-        # Si es el último chunk, decodificar todo
-        if request.is_final:
-            try:
-                # Unir todos los chunks
-                full_base64 = ''.join(session.base64_chunks)
-                
-                # Decodificar
-                content_bytes = base64.b64decode(full_base64)
-                session.raw_text = content_bytes.decode('utf-8', errors='ignore')
-                
-                # Limpiar
-                session.raw_text = clean_irc_codes(session.raw_text)
-                session.total_lines = len(session.raw_text.split('\n'))
-                
-                # Estimar preguntas
-                estimated = len(re.findall(r'Pregunta:\s*\d+\s*/\s*\d+', session.raw_text))
-                
-                response.update({
-                    "message": "Todos los chunks recibidos y decodificados",
-                    "total_lines": session.total_lines,
-                    "estimated_questions": estimated,
-                    "next_step": f"POST /process_session con session_id: {request.session_id}"
-                })
-                
-                # Liberar memoria de chunks base64
-                session.base64_chunks = []
-                
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Error decodificando: {str(e)}")
-        else:
-            response["next_step"] = "Continúa enviando chunks con /append_base64"
-        
-        return JSONResponse(response)
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)[:200]}")
+        raise HTTPException(status_code=500, detail=f"Error procesando: {str(e)[:500]}")
 
-@app.post("/process_session")
-async def process_session(request: ProcessSessionRequest):
-    """Procesa el texto completo y extrae las preguntas"""
-    if request.session_id not in sessions_storage:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+@app.get("/get_block/{session_id}/{block_number}")
+async def get_block(session_id: str, block_number: int):
+    """
+    PASO 2+: Obtiene un bloque específico de preguntas
+    El usuario puede pedir bloques según necesite
+    """
+    if session_id not in sessions_storage:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada o expirada")
     
-    session = sessions_storage[request.session_id]
+    session = sessions_storage[session_id]
+    session.last_access = datetime.now()
     
-    if not session.raw_text:
-        raise HTTPException(status_code=400, detail="No hay texto para procesar. Asegúrate de enviar todos los chunks primero")
+    if not session.processed:
+        raise HTTPException(status_code=400, detail="Sesión no procesada")
     
-    try:
-        session.last_access = datetime.now()
-        
-        # Extraer preguntas
-        session.questions = extract_questions_from_text(session.raw_text)
-        session.processed = True
-        
-        # Estadísticas
-        categories_count = {}
-        for q in session.questions:
-            if q['categoria']:
-                categories_count[q['categoria']] = categories_count.get(q['categoria'], 0) + 1
-        
-        # Detectar equipos
-        equipos = []
-        if 'FOGUETES' in session.raw_text[:2000]:
-            equipos.append('FOGUETES')
-        if 'LIDERES' in session.raw_text[:2000] or 'LÍDERES' in session.raw_text[:2000]:
-            equipos.append('LIDERES')
-        
-        return JSONResponse({
-            "session_id": request.session_id,
-            "total_questions": len(session.questions),
-            "categories": categories_count,
-            "equipos": equipos,
-            "message": f"Procesadas {len(session.questions)} preguntas",
-            "next_step": f"GET /get_questions/{request.session_id}/1/5"
-        })
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error procesando: {str(e)[:200]}")
+    # Validar número de bloque
+    if block_number < 1 or block_number > len(session.question_blocks):
+        raise HTTPException(status_code=400, detail=f"Bloque inválido. Debe estar entre 1 y {len(session.question_blocks)}")
+    
+    # Obtener el bloque (índice base 0)
+    block = session.question_blocks[block_number - 1]
+    
+    # Calcular rango de preguntas
+    start_q = (block_number - 1) * 5 + 1
+    end_q = start_q + len(block) - 1
+    
+    return JSONResponse({
+        "session_id": session_id,
+        "block_number": block_number,
+        "total_blocks": len(session.question_blocks),
+        "questions_range": f"{start_q}-{end_q}",
+        "questions": block,
+        "has_more": block_number < len(session.question_blocks),
+        "next_block": block_number + 1 if block_number < len(session.question_blocks) else None,
+        "message": f"Bloque {block_number} de {len(session.question_blocks)}"
+    })
 
-@app.get("/get_questions/{session_id}/{start}/{end}")
-async def get_questions(session_id: str, start: int, end: int):
-    """Devuelve un rango de preguntas"""
+@app.get("/session_info/{session_id}")
+async def session_info(session_id: str):
+    """
+    Obtiene información general de la sesión sin las preguntas
+    """
     if session_id not in sessions_storage:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     
     session = sessions_storage[session_id]
     
-    if not session.processed:
-        raise HTTPException(status_code=400, detail="Sesión no procesada")
+    # Calcular estadísticas
+    stats = {
+        'total_questions': session.total_questions,
+        'total_blocks': len(session.question_blocks),
+        'questions_per_block': 5,
+        'equipos': session.metadata.get('equipos', []),
+        'filename': session.metadata.get('filename', 'unknown'),
+        'total_lines': session.metadata.get('total_lines', 0)
+    }
     
-    start_idx = max(0, start - 1)
-    end_idx = min(end, len(session.questions))
-    
-    questions_slice = session.questions[start_idx:end_idx]
+    # Top jugadores si está procesado
+    if session.processed:
+        ganadores = {}
+        for block in session.question_blocks:
+            for q in block:
+                if q['ganador']:
+                    ganadores[q['ganador']] = ganadores.get(q['ganador'], 0) + 1
+        
+        top_3 = sorted(ganadores.items(), key=lambda x: x[1], reverse=True)[:3]
+        stats['top_players'] = [{'player': p[0], 'wins': p[1]} for p in top_3]
     
     return JSONResponse({
         "session_id": session_id,
-        "questions": questions_slice,
-        "returned_range": f"{start}-{end_idx}",
-        "total_questions": len(session.questions),
-        "has_more": end_idx < len(session.questions),
-        "next_range": f"{end_idx + 1}-{min(end_idx + 5, len(session.questions))}" if end_idx < len(session.questions) else None
+        "status": "ready",
+        "statistics": stats,
+        "available_blocks": list(range(1, len(session.question_blocks) + 1)),
+        "instructions": f"Usa /get_block/{session_id}/N para obtener el bloque N (1-{len(session.question_blocks)})"
     })
 
 def cleanup_old_sessions():
-    """Limpia sesiones de más de 2 horas"""
-    cutoff = datetime.now() - timedelta(hours=2)
+    """Limpia sesiones de más de 3 horas"""
+    cutoff = datetime.now() - timedelta(hours=3)
     expired = [sid for sid, s in sessions_storage.items() 
               if s.created_at < cutoff]
     for sid in expired:
@@ -295,19 +294,22 @@ def cleanup_old_sessions():
 async def root():
     return {
         "service": "Trivial Chunker API",
-        "version": "9.0.0",
+        "version": "10.0.0",
         "status": "active",
-        "sessions": len(sessions_storage),
-        "endpoints": {
-            "base64_chunked": [
-                "POST /init_base64_session - Inicia sesión con primer chunk",
-                "POST /append_base64 - Añade más chunks base64",
-                "POST /process_session - Procesa el texto completo",
-                "GET /get_questions/{id}/{start}/{end} - Obtiene preguntas"
-            ]
+        "active_sessions": len(sessions_storage),
+        "description": "Sistema de procesamiento de logs de Trivial IRC con troceado automático en servidor",
+        "workflow": {
+            "step1": "POST /upload_complete_log - Sube el log completo en base64",
+            "step2": "GET /session_info/{session_id} - Obtiene información de la sesión",
+            "step3": "GET /get_block/{session_id}/{N} - Obtiene el bloque N de preguntas"
         }
     }
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "sessions": len(sessions_storage)}
+    total_questions = sum(s.total_questions for s in sessions_storage.values())
+    return {
+        "status": "healthy",
+        "active_sessions": len(sessions_storage),
+        "total_questions_stored": total_questions
+    }
