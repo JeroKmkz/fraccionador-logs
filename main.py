@@ -11,7 +11,7 @@ import binascii
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="11.2.0")
+app = FastAPI(title="Trivial Chunker API", version="11.3.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -102,7 +102,7 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
 @app.post("/upload_complete_log")
 async def upload_complete_log(request: UploadLogRequest):
     try:
-        # 🔥 NUEVO: decodificación robusta base64 + gzip
+        # 🔥 Decodificación robusta base64
         try:
             decoded = base64.b64decode(request.content_base64, validate=False)
         except binascii.Error:
@@ -111,10 +111,14 @@ async def upload_complete_log(request: UploadLogRequest):
                 request.content_base64 += '=' * (4 - missing_padding)
             decoded = base64.b64decode(request.content_base64)
         
-        with gzip.GzipFile(fileobj=io.BytesIO(decoded), mode='rb') as f:
-            content_bytes = f.read()
+        # 🔥 Soporte dual: gzip o plano
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(decoded), mode='rb') as f:
+                content_bytes = f.read()
+        except OSError:
+            content_bytes = decoded  # no era gzip, usar tal cual
+        
         text = content_bytes.decode('utf-8', errors='ignore')
-
         if not text:
             raise HTTPException(status_code=400, detail="Contenido vacío")
         
@@ -192,9 +196,8 @@ async def debug_session(session_id: str):
 
 @app.get("/")
 async def root():
-    return {"service": "Trivial Chunker API", "version": "11.2.0", "status": "active"}
+    return {"service": "Trivial Chunker API", "version": "11.3.0", "status": "active"}
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "sessions": len(sessions_storage)}
-
