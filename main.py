@@ -5,10 +5,12 @@ from pydantic import BaseModel
 import re
 import uuid
 import base64
+import gzip
+import io
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 
-app = FastAPI(title="Trivial Chunker API", version="11.0.0")
+app = FastAPI(title="Trivial Chunker API", version="11.1.0")
 
 # CORS para ChatGPT
 app.add_middleware(
@@ -39,11 +41,8 @@ class UploadLogRequest(BaseModel):
 
 def clean_irc_codes(text: str) -> str:
     """Limpia colores, timestamps y nicks"""
-    # Eliminar códigos de color IRC
     text = re.sub(r'\x03\d{0,2}(?:,\d{1,2})?', '', text)
-    # Eliminar otros códigos de control
     text = re.sub(r'[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]', '', text)
-    # Eliminar timestamps y nicks tipo: 23:00:36''976 <Usuario>
     text = re.sub(r'^\d{2}:\d{2}:\d{2}.*?>\s*', '', text, flags=re.MULTILINE)
     return text.strip()
 
@@ -74,24 +73,20 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
             continue
 
         if current_q:
-            # Categoría + pregunta
             if not current_q['pregunta']:
                 cat_match = re.match(r'([A-ZÁÉÍÓÚÜÑ\- ]+)\s+(.+)', clean_line)
                 if cat_match:
                     current_q['categoria'] = cat_match.group(1).strip()
                     current_q['pregunta'] = cat_match.group(2).strip()
             
-            # Ganador
             if '>>>' in clean_line and 'scratchea' not in clean_line.lower():
                 ganador_match = re.search(r'>>>(\w+)', clean_line)
                 if ganador_match and not current_q['ganador']:
                     current_q['ganador'] = ganador_match.group(1)
-                    # Extraer tiempo opcional
                     tiempo_match = re.search(r'(\d+)[\'"`](\d+)', clean_line)
                     if tiempo_match:
                         current_q['tiempo'] = f"{tiempo_match.group(1)}.{tiempo_match.group(2)}s"
             
-            # Respuesta correcta
             resp_match = re.search(r'(?:La buena|Las buenas|Respuesta correcta|La respuesta es):\s*(.+?)(?:Mandada por:|$)', clean_line, re.IGNORECASE)
             if resp_match:
                 current_q['respuesta'] = resp_match.group(1).strip()
@@ -99,7 +94,6 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
     if current_q and current_q.get('pregunta'):
         all_questions.append(current_q)
 
-    # Dividir en bloques de N
     blocks = []
     for i in range(0, len(all_questions), questions_per_block):
         blocks.append(all_questions[i:i + questions_per_block])
@@ -108,8 +102,12 @@ def extract_and_chunk_questions(text: str, questions_per_block: int = 5) -> List
 @app.post("/upload_complete_log")
 async def upload_complete_log(request: UploadLogRequest):
     try:
-        content_bytes = base64.b64decode(request.content_base64)
+        # 🔥 NUEVO: decodificar base64 y descomprimir con gzip
+        decoded = base64.b64decode(request.content_base64)
+        with gzip.GzipFile(fileobj=io.BytesIO(decoded), mode='rb') as f:
+            content_bytes = f.read()
         text = content_bytes.decode('utf-8', errors='ignore')
+
         if not text:
             raise HTTPException(status_code=400, detail="Contenido vacío")
         
@@ -121,7 +119,6 @@ async def upload_complete_log(request: UploadLogRequest):
         session.total_questions = sum(len(b) for b in session.question_blocks)
         session.processed = True
 
-        # Detectar equipos
         equipos = []
         if 'FOGUETES' in text.upper():
             equipos.append('FOGUETES')
@@ -188,7 +185,7 @@ async def debug_session(session_id: str):
 
 @app.get("/")
 async def root():
-    return {"service": "Trivial Chunker API", "version": "11.0.0", "status": "active"}
+    return {"service": "Trivial Chunker API", "version": "11.1.0", "status": "active"}
 
 @app.get("/health")
 async def health():
