@@ -36,7 +36,7 @@
       border-color: #007bff;
       background-color: #f0f8ff;
     }
-    input[type="file"] {
+    input[type="file"], input[type="number"] {
       margin: 20px 0;
     }
     .button {
@@ -84,6 +84,9 @@
       <h3>📄 Subir Log</h3>
       <p>Sube el archivo .txt del log de una partida</p>
       <input type="file" id="fileInputLog" accept=".txt" />
+      <br />
+      <label for="numPartes"><strong>⚙️ Número de partes:</strong></label><br/>
+      <input type="number" id="numPartes" min="2" max="20" value="4" style="width:80px; text-align:center;" />
       <br />
       <button class="button" onclick="processLog()" id="processLogBtn" disabled>Procesar Log</button>
     </div>
@@ -175,17 +178,17 @@
     // Procesar log subido
     function processLog() {
       const file = document.getElementById('fileInputLog').files[0];
+      const numPartes = parseInt(document.getElementById('numPartes').value) || 4;
       if (!file) return showError("Selecciona un archivo primero");
 
       const reader = new FileReader();
       reader.onload = function(e) {
         try {
           const contenido = e.target.result;
-          // Cambia este número para decidir en cuántas partes dividir
-          const partes = dividirArchivo(contenido, 7);
+          const partes = dividirArchivo(contenido, numPartes);
 
           const resultsDiv = document.getElementById('results');
-          resultsDiv.innerHTML = "<h3>Archivos generados:</h3>";
+          resultsDiv.innerHTML = `<h3>Archivos generados (${numPartes} partes):</h3>`;
 
           partes.forEach((parte, idx) => {
             const btn = document.createElement("button");
@@ -203,7 +206,7 @@
           resultsDiv.appendChild(btnZip);
 
           resultsDiv.style.display = "block";
-          showSuccess("Log procesado correctamente, partes listas para descargar");
+          showSuccess(`Log procesado correctamente en ${numPartes} partes`);
         } catch (err) {
           showError("Error: " + err.message);
         }
