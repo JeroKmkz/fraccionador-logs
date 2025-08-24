@@ -1,729 +1,232 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fraccionador y limpiador de Logs - Trivial IRC</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 700px;
-            width: 100%;
-            padding: 40px;
-            animation: slideIn 0.5s ease-out;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        h1 {
-            text-align: center;
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 2em;
-        }
-
-        .subtitle {
-            text-align: center;
-            color: #666;
-            margin-bottom: 30px;
-            font-size: 0.9em;
-        }
-
-        .upload-area {
-            border: 3px dashed #ddd;
-            border-radius: 15px;
-            padding: 40px;
-            text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            background: #fafafa;
-            margin-bottom: 30px;
-        }
-
-        .upload-area:hover {
-            border-color: #667eea;
-            background: #f0f0ff;
-        }
-
-        .upload-area.dragover {
-            border-color: #764ba2;
-            background: #e8e0ff;
-            transform: scale(1.02);
-        }
-
-        .upload-icon {
-            font-size: 3em;
-            margin-bottom: 10px;
-            color: #667eea;
-        }
-
-        .upload-text {
-            color: #666;
-            font-size: 1.1em;
-            margin-bottom: 10px;
-        }
-
-        .upload-hint {
-            color: #999;
-            font-size: 0.9em;
-        }
-
-        .file-input {
-            display: none;
-        }
-
-        .options {
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #f8f9fa;
-            border-radius: 10px;
-        }
-
-        .option-group {
-            margin-bottom: 20px;
-        }
-
-        .option-group:last-child {
-            margin-bottom: 0;
-        }
-
-        .option-label {
-            display: block;
-            color: #555;
-            margin-bottom: 8px;
-            font-weight: 500;
-        }
-
-        .option-input {
-            width: 100%;
-            padding: 10px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-size: 1em;
-            transition: border-color 0.3s;
-        }
-
-        .option-input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .checkbox-group input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-
-        .checkbox-group label {
-            cursor: pointer;
-            color: #555;
-        }
-
-        .process-btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.3s, box-shadow 0.3s;
-            margin-bottom: 20px;
-            display: none;
-        }
-
-        .process-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
-        }
-
-        .process-btn:active {
-            transform: translateY(0);
-        }
-
-        .process-btn.show {
-            display: block;
-        }
-
-        .status {
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            display: none;
-        }
-
-        .status.info {
-            background: #e3f2fd;
-            color: #1976d2;
-            border: 1px solid #90caf9;
-        }
-
-        .status.success {
-            background: #e8f5e9;
-            color: #388e3c;
-            border: 1px solid #81c784;
-        }
-
-        .status.error {
-            background: #ffebee;
-            color: #c62828;
-            border: 1px solid #ef9a9a;
-        }
-
-        .status.show {
-            display: block;
-        }
-
-        .results {
-            display: none;
-            margin-top: 30px;
-        }
-
-        .results.show {
-            display: block;
-        }
-
-        .results-title {
-            color: #333;
-            margin-bottom: 15px;
-            font-size: 1.2em;
-            font-weight: bold;
-        }
-
-        .file-list {
-            list-style: none;
-            padding: 0;
-        }
-
-        .file-item {
-            background: #f8f9fa;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: background 0.3s;
-        }
-
-        .file-item:hover {
-            background: #e9ecef;
-        }
-
-        .file-info {
-            flex: 1;
-        }
-
-        .file-name {
-            color: #333;
-            font-weight: 500;
-            margin-bottom: 5px;
-        }
-
-        .file-details {
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        .download-btn {
-            padding: 8px 20px;
-            background: #667eea;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            transition: background 0.3s;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        .download-btn:hover {
-            background: #5a67d8;
-        }
-
-        .download-all-btn {
-            width: 100%;
-            padding: 15px;
-            background: #28a745;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: transform 0.3s, box-shadow 0.3s;
-            margin-top: 20px;
-        }
-
-        .download-all-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(40, 167, 69, 0.4);
-            background: #218838;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-            margin-right: 10px;
-            vertical-align: middle;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            color: #666;
-            font-size: 0.9em;
-        }
-
-        .footer a {
-            color: #667eea;
-            text-decoration: none;
-        }
-
-        .footer a:hover {
-            text-decoration: underline;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Procesador de Logs de Trivial IRC</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background-color: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    .upload-section {
+      border: 2px dashed #ddd;
+      padding: 40px;
+      text-align: center;
+      margin-bottom: 30px;
+      border-radius: 8px;
+      background-color: #fafafa;
+    }
+    .upload-section:hover {
+      border-color: #007bff;
+      background-color: #f0f8ff;
+    }
+    input[type="file"] {
+      margin: 20px 0;
+    }
+    .button {
+      background-color: #007bff;
+      color: white;
+      padding: 12px 25px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px;
+    }
+    .button:hover {
+      background-color: #0056b3;
+    }
+    .button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    .results {
+      margin-top: 30px;
+    }
+    .error {
+      color: #dc3545;
+      background-color: #f8d7da;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+    }
+    .success {
+      color: #155724;
+      background-color: #d4edda;
+      padding: 15px;
+      border-radius: 5px;
+      margin: 20px 0;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎯 Fraccionador de Logs - Trivial IRC</h1>
-        <p class="subtitle">Limpia y divide tus logs de partidas en partes manejables</p>
-
-        <div class="upload-area" id="uploadArea">
-            <div class="upload-icon">📁</div>
-            <div class="upload-text">Arrastra tu archivo aquí</div>
-            <div class="upload-hint">o haz clic para seleccionar</div>
-            <input type="file" id="fileInput" class="file-input" accept=".txt,.log">
-        </div>
-
-        <div class="options">
-            <div class="option-group">
-                <label class="option-label" for="numParts">Número de partes:</label>
-                <input type="number" id="numParts" class="option-input" min="2" max="20" value="4">
-            </div>
-            
-            <div class="option-group">
-                <div class="checkbox-group">
-                    <input type="checkbox" id="cleanIRC" checked>
-                    <label for="cleanIRC">Limpiar códigos IRC (colores, formatos)</label>
-                </div>
-            </div>
-        </div>
-
-        <button id="processBtn" class="process-btn">
-            <span id="processBtnText">Procesar Archivo</span>
-        </button>
-
-        <div id="status" class="status"></div>
-
-        <div id="results" class="results">
-            <h3 class="results-title">📦 Archivos Generados</h3>
-            <ul id="fileList" class="file-list"></ul>
-            <button id="downloadAllBtn" class="download-all-btn">
-                ⬇️ Descargar Todo (ZIP)
-            </button>
-        </div>
-
-        <div class="footer">
-            <p>Desarrollado para la comunidad de Trivial IRC</p>
-            <p><a href="https://github.com/tu-usuario/fraccionador-logs" target="_blank">GitHub</a></p>
-        </div>
+  <div class="container">
+    <h1>🎯 Procesador de Logs de Trivial IRC</h1>
+    
+    <!-- SUBIDA DE LOGS -->
+    <div class="upload-section">
+      <h3>📄 Subir Log</h3>
+      <p>Sube el archivo .txt del log de una partida</p>
+      <input type="file" id="fileInputLog" accept=".txt" />
+      <br />
+      <button class="button" onclick="processLog()" id="processLogBtn" disabled>Procesar Log</button>
     </div>
 
-    <!-- Script para manejar JSZip -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    
-    <script>
-        // Variables globales
-        let selectedFile = null;
-        let processedFiles = [];
+    <div id="results" class="results" style="display: none;"></div>
+  </div>
 
-        // Elementos del DOM
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const processBtn = document.getElementById('processBtn');
-        const processBtnText = document.getElementById('processBtnText');
-        const statusDiv = document.getElementById('status');
-        const resultsDiv = document.getElementById('results');
-        const fileList = document.getElementById('fileList');
-        const downloadAllBtn = document.getElementById('downloadAllBtn');
-        const numPartsInput = document.getElementById('numParts');
-        const cleanIRCCheckbox = document.getElementById('cleanIRC');
+  <script>
+    // Activar botón al elegir archivo
+    document.getElementById('fileInputLog').addEventListener('change', function(e) {
+      document.getElementById('processLogBtn').disabled = !e.target.files.length;
+    });
 
-        // Event listeners
-        uploadArea.addEventListener('click', () => fileInput.click());
-        
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFileSelect(files[0]);
-            }
-        });
-        
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
-            }
-        });
-        
-        processBtn.addEventListener('click', processFile);
-        downloadAllBtn.addEventListener('click', downloadAllAsZip);
-
-        // Función para manejar la selección de archivo
-        function handleFileSelect(file) {
-            if (!file.name.match(/\.(txt|log)$/i)) {
-                showStatus('Por favor, selecciona un archivo .txt o .log', 'error');
-                return;
-            }
-            
-            selectedFile = file;
-            showStatus(`Archivo seleccionado: ${file.name} (${formatFileSize(file.size)})`, 'info');
-            processBtn.classList.add('show');
-            resultsDiv.classList.remove('show');
+    // Buscar posiciones de preguntas
+    function encontrarPosicionesPreguntas(contenido) {
+      const lineas = contenido.split("\n");
+      const posiciones = [];
+      lineas.forEach((linea, i) => {
+        if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base Datos Preguntas:/i.test(linea)) {
+          posiciones.push(i);
         }
+      });
+      return posiciones;
+    }
 
-        // Función para formatear tamaño de archivo
-        function formatFileSize(bytes) {
-            if (bytes < 1024) return bytes + ' bytes';
-            else if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
-            else return Math.round(bytes / 1048576) + ' MB';
-        }
+    // Dividir archivo en partes
+    function dividirArchivo(contenido, numPartes = 5) {
+      const lineas = contenido.split("\n");
+      const posiciones = encontrarPosicionesPreguntas(contenido);
+      if (posiciones.length === 0) {
+        throw new Error("No se encontraron preguntas en el archivo");
+      }
 
-        // Función para mostrar estado
-        function showStatus(message, type = 'info') {
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${type} show`;
-        }
+      const totalLineas = lineas.length;
+      const lineasPorParte = Math.floor(totalLineas / numPartes);
+      const cortes = [];
+      let ultimoCorte = 0;
 
-        // Función para limpiar códigos IRC
-        function cleanIRCCodes(text) {
-            if (!cleanIRCCheckbox.checked) {
-                return text;
-            }
-            
-            // Eliminar códigos de color IRC (\x03 seguido de números)
-            text = text.replace(/\x03\d{0,2}(?:,\d{1,2})?/g, '');
-            
-            // Eliminar otros códigos de control
-            text = text.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
-            
-            // Limpiar patrones de color numéricos al inicio de línea
-            text = text.replace(/^\d+,\d+\s+/gm, '');
-            
-            // Normalizar espacios múltiples
-            text = text.replace(/\s{2,}/g, ' ');
-            
-            return text;
+      for (let i = 1; i < numPartes; i++) {
+        const lineaObjetivo = i * lineasPorParte;
+        let mejorPos = ultimoCorte;
+        for (const pos of posiciones) {
+          if (pos <= lineaObjetivo) mejorPos = pos;
+          else break;
         }
+        if (mejorPos > ultimoCorte) {
+          cortes.push(mejorPos);
+          ultimoCorte = mejorPos;
+        }
+      }
 
-        // Función para encontrar posiciones de preguntas
-        function findQuestionPositions(lines) {
-            const positions = [];
-            
-            lines.forEach((line, index) => {
-                // Buscar patrón de pregunta
-                if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base Datos Preguntas:/i.test(line)) {
-                    positions.push(index);
-                }
-            });
-            
-            return positions;
-        }
+      const partes = [];
+      let inicio = 0;
+      cortes.concat([totalLineas]).forEach((fin, idx) => {
+        const fragmento = lineas.slice(inicio, fin).join("\n");
+        partes.push({ nombre: `parte_${idx+1}.txt`, contenido: fragmento });
+        inicio = fin;
+      });
 
-        // Función principal para procesar el archivo
-        async function processFile() {
-            if (!selectedFile) {
-                showStatus('Por favor, selecciona un archivo primero', 'error');
-                return;
-            }
-            
-            // Deshabilitar botón durante procesamiento
-            processBtn.disabled = true;
-            processBtnText.innerHTML = '<span class="spinner"></span>Procesando...';
-            
-            try {
-                // Leer archivo
-                const text = await readFileAsText(selectedFile);
-                
-                // Limpiar códigos IRC si está activado
-                const cleanedText = cleanIRCCodes(text);
-                
-                // Dividir en líneas
-                const lines = cleanedText.split('\n');
-                
-                // Encontrar posiciones de preguntas
-                const questionPositions = findQuestionPositions(lines);
-                
-                if (questionPositions.length === 0) {
-                    showStatus('No se encontraron preguntas en el archivo. Dividiré por líneas.', 'info');
-                }
-                
-                // Obtener número de partes
-                const numParts = parseInt(numPartsInput.value) || 4;
-                
-                // Dividir el archivo
-                const parts = divideFile(lines, questionPositions, numParts);
-                
-                // Generar archivos
-                processedFiles = generateFiles(parts, selectedFile.name);
-                
-                // Mostrar resultados
-                displayResults();
-                
-                showStatus(`✅ Archivo procesado exitosamente en ${numParts} partes`, 'success');
-                
-            } catch (error) {
-                showStatus(`Error: ${error.message}`, 'error');
-                console.error(error);
-            } finally {
-                // Rehabilitar botón
-                processBtn.disabled = false;
-                processBtnText.textContent = 'Procesar Archivo';
-            }
-        }
+      return partes;
+    }
 
-        // Función para leer archivo como texto
-        function readFileAsText(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.onerror = reject;
-                reader.readAsText(file, 'utf-8');
-            });
-        }
+    // Descargar archivo individual
+    function descargarParte(nombre, contenido) {
+      const blob = new Blob([contenido], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombre;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
 
-        // Función para dividir el archivo
-        function divideFile(lines, questionPositions, numParts) {
-            const parts = [];
-            const totalLines = lines.length;
-            
-            if (questionPositions.length > 0) {
-                // Dividir basándose en preguntas
-                const questionsPerPart = Math.ceil(questionPositions.length / numParts);
-                let currentPart = [];
-                let questionCount = 0;
-                let lastCutPosition = 0;
-                
-                for (let i = 0; i < numParts - 1; i++) {
-                    const targetQuestion = (i + 1) * questionsPerPart;
-                    let cutPosition = totalLines;
-                    
-                    // Encontrar la pregunta más cercana al objetivo
-                    for (let j = 0; j < questionPositions.length; j++) {
-                        if (j >= targetQuestion) {
-                            cutPosition = questionPositions[j];
-                            break;
-                        }
-                    }
-                    
-                    // Si no hay más preguntas, usar el final del archivo
-                    if (cutPosition === totalLines && i < numParts - 1) {
-                        cutPosition = Math.floor((i + 1) * totalLines / numParts);
-                    }
-                    
-                    parts.push(lines.slice(lastCutPosition, cutPosition));
-                    lastCutPosition = cutPosition;
-                }
-                
-                // Añadir la última parte
-                parts.push(lines.slice(lastCutPosition));
-                
-            } else {
-                // División simple por líneas
-                const linesPerPart = Math.ceil(totalLines / numParts);
-                
-                for (let i = 0; i < numParts; i++) {
-                    const start = i * linesPerPart;
-                    const end = Math.min((i + 1) * linesPerPart, totalLines);
-                    parts.push(lines.slice(start, end));
-                }
-            }
-            
-            // Filtrar partes vacías
-            return parts.filter(part => part.length > 0);
-        }
+    // Descargar todas las partes en ZIP
+    async function descargarZip(partes) {
+      const zip = new JSZip();
+      partes.forEach(parte => {
+        zip.file(parte.nombre, parte.contenido);
+      });
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "partes_trivial.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
 
-        // Función para generar archivos
-        function generateFiles(parts, originalName) {
-            const files = [];
-            const baseName = originalName.replace(/\.(txt|log)$/i, '');
-            const extension = originalName.match(/\.(txt|log)$/i)[0];
-            
-            parts.forEach((part, index) => {
-                const fileName = `${baseName}_parte_${String(index + 1).padStart(2, '0')}${extension}`;
-                const content = part.join('\n');
-                const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-                
-                files.push({
-                    name: fileName,
-                    blob: blob,
-                    size: blob.size,
-                    lines: part.length,
-                    questionCount: countQuestions(part)
-                });
-            });
-            
-            return files;
-        }
+    // Procesar log subido
+    function processLog() {
+      const file = document.getElementById('fileInputLog').files[0];
+      if (!file) return showError("Selecciona un archivo primero");
 
-        // Función para contar preguntas en una parte
-        function countQuestions(lines) {
-            let count = 0;
-            lines.forEach(line => {
-                if (/Pregunta:\s*\d+\s*\/\s*\d+/i.test(line)) {
-                    count++;
-                }
-            });
-            return count;
-        }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const contenido = e.target.result;
+          // Cambia este número para decidir en cuántas partes dividir
+          const partes = dividirArchivo(contenido, 7);
 
-        // Función para mostrar resultados
-        function displayResults() {
-            fileList.innerHTML = '';
-            
-            processedFiles.forEach((file, index) => {
-                const li = document.createElement('li');
-                li.className = 'file-item';
-                
-                li.innerHTML = `
-                    <div class="file-info">
-                        <div class="file-name">${file.name}</div>
-                        <div class="file-details">
-                            ${file.lines} líneas | ${formatFileSize(file.size)}
-                            ${file.questionCount > 0 ? ` | ${file.questionCount} preguntas` : ''}
-                        </div>
-                    </div>
-                    <a href="#" class="download-btn" data-index="${index}">Descargar</a>
-                `;
-                
-                fileList.appendChild(li);
-            });
-            
-            // Añadir event listeners a los botones de descarga
-            document.querySelectorAll('.download-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const index = parseInt(e.target.dataset.index);
-                    downloadFile(processedFiles[index]);
-                });
-            });
-            
-            resultsDiv.classList.add('show');
-        }
+          const resultsDiv = document.getElementById('results');
+          resultsDiv.innerHTML = "<h3>Archivos generados:</h3>";
 
-        // Función para descargar un archivo individual
-        function downloadFile(file) {
-            const url = URL.createObjectURL(file.blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
+          partes.forEach((parte, idx) => {
+            const btn = document.createElement("button");
+            btn.className = "button";
+            btn.textContent = `Descargar ${parte.nombre}`;
+            btn.onclick = () => descargarParte(parte.nombre, parte.contenido);
+            resultsDiv.appendChild(btn);
+          });
 
-        // Función para descargar todo como ZIP
-        async function downloadAllAsZip() {
-            if (processedFiles.length === 0) return;
-            
-            downloadAllBtn.disabled = true;
-            downloadAllBtn.innerHTML = '<span class="spinner"></span>Generando ZIP...';
-            
-            try {
-                const zip = new JSZip();
-                
-                // Añadir cada archivo al ZIP
-                for (const file of processedFiles) {
-                    const content = await file.blob.text();
-                    zip.file(file.name, content);
-                }
-                
-                // Generar el ZIP
-                const zipBlob = await zip.generateAsync({ type: 'blob' });
-                
-                // Descargar el ZIP
-                const baseName = selectedFile.name.replace(/\.(txt|log)$/i, '');
-                const zipName = `${baseName}_dividido.zip`;
-                
-                const url = URL.createObjectURL(zipBlob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = zipName;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                
-                showStatus('✅ ZIP descargado exitosamente', 'success');
-                
-            } catch (error) {
-                showStatus(`Error generando ZIP: ${error.message}`, 'error');
-            } finally {
-                downloadAllBtn.disabled = false;
-                downloadAllBtn.innerHTML = '⬇️ Descargar Todo (ZIP)';
-            }
+          const btnZip = document.createElement("button");
+          btnZip.className = "button";
+          btnZip.style.backgroundColor = "#28a745";
+          btnZip.textContent = "📦 Descargar todas en ZIP";
+          btnZip.onclick = () => descargarZip(partes);
+          resultsDiv.appendChild(btnZip);
+
+          resultsDiv.style.display = "block";
+          showSuccess("Log procesado correctamente, partes listas para descargar");
+        } catch (err) {
+          showError("Error: " + err.message);
         }
-    </script>
+      };
+      reader.readAsText(file);
+    }
+
+    // Mensajes flotantes
+    function showError(msg) {
+      const div = document.createElement("div");
+      div.className = "error";
+      div.textContent = msg;
+      document.body.appendChild(div);
+      setTimeout(() => div.remove(), 5000);
+    }
+
+    function showSuccess(msg) {
+      const div = document.createElement("div");
+      div.className = "success";
+      div.textContent = msg;
+      document.body.appendChild(div);
+      setTimeout(() => div.remove(), 3000);
+    }
+  </script>
 </body>
 </html>
