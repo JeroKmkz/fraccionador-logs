@@ -100,12 +100,13 @@
       document.getElementById('processLogBtn').disabled = !e.target.files.length;
     });
 
-    // Buscar posiciones de preguntas
+    // Buscar posiciones de preguntas (regex igual que en el .py)
     function encontrarPosicionesPreguntas(contenido) {
       const lineas = contenido.split("\n");
       const posiciones = [];
       lineas.forEach((linea, i) => {
-        if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base Datos Preguntas:/i.test(linea)) {
+        // console.log("Linea", i, "=>", linea); // <- Descomenta para depurar
+        if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(linea)) {
           posiciones.push(i);
         }
       });
