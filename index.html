@@ -82,7 +82,7 @@
     <!-- SUBIDA DE LOGS -->
     <div class="upload-section">
       <h3>📄 Subir Log</h3>
-      <p>Sube el archivo .txt del log de una partida</p>
+      <p>Sube el archivo .txt del log de una partida (con o sin códigos IRC)</p>
       <input type="file" id="fileInputLog" accept=".txt" />
       <br />
       <label for="numPartes"><strong>⚙️ Número de partes:</strong></label><br/>
@@ -95,17 +95,34 @@
   </div>
 
   <script>
-    // Activar botón al elegir archivo
-    document.getElementById('fileInputLog').addEventListener('change', function(e) {
-      document.getElementById('processLogBtn').disabled = !e.target.files.length;
-    });
+    // --- LIMPIEZA DE LÍNEAS (imitando irc_log_cleaner.py) ---
+    function limpiarLinea(linea) {
+      return linea
+        .replace(/\x03\d{1,2}(?:,\d{1,2})?/g, "")   // Colores
+        .replace(/\x02/g, "")                       // Negrita
+        .replace(/\x1D/g, "")                       // Cursiva
+        .replace(/\x1F/g, "")                       // Subrayado
+        .replace(/\x0F/g, "")                       // Reset
+        .replace(/\x7F/g, "")                       // Delete
+        .replace(/\b\d{1,2},\d{1,2}\b/g, "")        // Coordenadas tipo 2,9
+        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "") // ANSI
+        .replace(/\s{2,}/g, " ")                    // Espacios múltiples
+        .replace(/^[:\?]\s*/, "")                   // Residuales al inicio
+        .trim();
+    }
 
-    // Buscar posiciones de preguntas (regex igual que en el .py)
+    function limpiarArchivo(contenido) {
+      return contenido
+        .split("\n")
+        .map(limpiarLinea)
+        .join("\n");
+    }
+
+    // --- DETECTAR PREGUNTAS ---
     function encontrarPosicionesPreguntas(contenido) {
       const lineas = contenido.split("\n");
       const posiciones = [];
       lineas.forEach((linea, i) => {
-        // console.log("Linea", i, "=>", linea); // <- Descomenta para depurar
         if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(linea)) {
           posiciones.push(i);
         }
@@ -113,7 +130,7 @@
       return posiciones;
     }
 
-    // Dividir archivo en partes
+    // --- DIVISIÓN EN PARTES ---
     function dividirArchivo(contenido, numPartes = 5) {
       const lineas = contenido.split("\n");
       const posiciones = encontrarPosicionesPreguntas(contenido);
@@ -150,7 +167,7 @@
       return partes;
     }
 
-    // Descargar archivo individual
+    // --- DESCARGAS ---
     function descargarParte(nombre, contenido) {
       const blob = new Blob([contenido], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);
@@ -161,7 +178,6 @@
       URL.revokeObjectURL(url);
     }
 
-    // Descargar todas las partes en ZIP
     async function descargarZip(partes) {
       const zip = new JSZip();
       partes.forEach(parte => {
@@ -176,7 +192,7 @@
       URL.revokeObjectURL(url);
     }
 
-    // Procesar log subido
+    // --- PROCESAR LOG ---
     function processLog() {
       const file = document.getElementById('fileInputLog').files[0];
       const numPartes = parseInt(document.getElementById('numPartes').value) || 4;
@@ -185,9 +201,14 @@
       const reader = new FileReader();
       reader.onload = function(e) {
         try {
+          // 1) Limpiar log
           const contenido = e.target.result;
-          const partes = dividirArchivo(contenido, numPartes);
+          const limpio = limpiarArchivo(contenido);
 
+          // 2) Dividir en partes
+          const partes = dividirArchivo(limpio, numPartes);
+
+          // 3) Mostrar botones de descarga
           const resultsDiv = document.getElementById('results');
           resultsDiv.innerHTML = `<h3>Archivos generados (${numPartes} partes):</h3>`;
 
@@ -207,7 +228,7 @@
           resultsDiv.appendChild(btnZip);
 
           resultsDiv.style.display = "block";
-          showSuccess(`Log procesado correctamente en ${numPartes} partes`);
+          showSuccess(`Log limpiado y procesado correctamente en ${numPartes} partes`);
         } catch (err) {
           showError("Error: " + err.message);
         }
@@ -215,7 +236,7 @@
       reader.readAsText(file);
     }
 
-    // Mensajes flotantes
+    // --- MENSAJES ---
     function showError(msg) {
       const div = document.createElement("div");
       div.className = "error";
