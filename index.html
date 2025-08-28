@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fraccionador de Logs - Trivial IRC</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -58,29 +59,30 @@
 
         .upload-area {
             border: 3px dashed #ddd;
-            border-radius: 15px;
             padding: 40px;
             text-align: center;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            background: #fafafa;
             margin-bottom: 30px;
+            border-radius: 15px;
+            background-color: #fafafa;
+            cursor: pointer;
+            transition: all 0.3s ease;
         }
 
-        .upload-area:hover,
+        .upload-area:hover {
+            border-color: #667eea;
+            background-color: #f0f0ff;
+        }
+
         .upload-area.dragover {
             border-color: #667eea;
-            background: #f0f0ff;
+            background-color: #f0f0ff;
+            transform: scale(1.02);
         }
 
         .upload-icon {
             font-size: 3em;
             margin-bottom: 10px;
             color: #667eea;
-        }
-
-        .file-input {
-            display: none;
         }
 
         .options {
@@ -121,62 +123,40 @@
             cursor: pointer;
         }
 
-        .process-btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .button {
+            background-color: #007bff;
             color: white;
+            padding: 15px 25px;
             border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
+            border-radius: 8px;
             cursor: pointer;
-            margin-bottom: 20px;
-            display: none;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            margin: 10px 0;
             transition: all 0.3s ease;
         }
 
-        .process-btn:disabled {
-            opacity: 0.6;
+        .button:hover {
+            background-color: #0056b3;
+        }
+
+        .button:disabled {
+            background-color: #ccc;
             cursor: not-allowed;
         }
 
-        .process-btn.show {
-            display: block;
+        .button.success {
+            background-color: #28a745;
         }
 
-        .status {
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            display: none;
-        }
-
-        .status.success {
-            background: #e8f5e9;
-            color: #388e3c;
-            border: 1px solid #81c784;
-        }
-
-        .status.error {
-            background: #ffebee;
-            color: #d32f2f;
-            border: 1px solid #ef5350;
-        }
-
-        .status.info {
-            background: #e3f2fd;
-            color: #1976d2;
-            border: 1px solid #64b5f6;
-        }
-
-        .status.show {
-            display: block;
+        .button.success:hover {
+            background-color: #218838;
         }
 
         .results {
-            display: none;
             margin-top: 30px;
+            display: none;
         }
 
         .results.show {
@@ -201,7 +181,6 @@
             border: none;
             border-radius: 6px;
             cursor: pointer;
-            text-decoration: none;
             transition: background 0.3s ease;
         }
 
@@ -209,22 +188,22 @@
             background: #5a67d8;
         }
 
-        .download-all-btn {
-            width: 100%;
+        .message {
             padding: 15px;
-            background: #28a745;
-            color: white;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: background 0.3s ease;
+            margin: 10px 0;
+            border-radius: 8px;
         }
 
-        .download-all-btn:hover {
-            background: #218838;
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
 
         .extras-section {
@@ -255,13 +234,13 @@
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📁</div>
             <div id="uploadText">Arrastra tu archivo aquí o haz clic para seleccionar</div>
-            <input type="file" id="fileInput" class="file-input" accept=".txt,.log">
+            <input type="file" id="fileInput" accept=".txt,.log" style="display: none;">
         </div>
 
         <div class="options">
             <div class="option-group">
-                <label class="option-label" for="numParts">Número de partes:</label>
-                <input type="number" id="numParts" class="option-input" min="2" max="20" value="4">
+                <label class="option-label" for="numPartes">Número de partes:</label>
+                <input type="number" id="numPartes" class="option-input" min="2" max="20" value="4">
             </div>
             
             <div class="option-group">
@@ -280,38 +259,77 @@
             </div>
         </div>
 
-        <button id="processBtn" class="process-btn">Procesar Archivo</button>
-        <div id="status" class="status"></div>
+        <button class="button" id="processBtn" style="display: none;">Procesar Archivo</button>
+        
+        <div id="messages"></div>
         <div id="results" class="results"></div>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    
     <script>
         let selectedFile = null;
-        let processedFiles = [];
+
+        // Elementos del DOM
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadText = document.getElementById('uploadText');
+        const processBtn = document.getElementById('processBtn');
+        const messages = document.getElementById('messages');
+        const results = document.getElementById('results');
+
+        // Event listeners usando la sintaxis que funciona
+        uploadArea.onclick = function() {
+            console.log('Click en área de carga');
+            fileInput.click();
+        };
+
+        uploadArea.ondragover = function(e) {
+            e.preventDefault();
+            console.log('Dragover');
+            uploadArea.classList.add('dragover');
+        };
+
+        uploadArea.ondragleave = function(e) {
+            e.preventDefault();
+            console.log('Dragleave');
+            uploadArea.classList.remove('dragover');
+        };
+
+        uploadArea.ondrop = function(e) {
+            e.preventDefault();
+            console.log('Drop');
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            console.log('Archivos dropeados:', files.length);
+            
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        };
+
+        fileInput.onchange = function(e) {
+            console.log('Change en input');
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        };
+
+        processBtn.onclick = function() {
+            processLog();
+        };
 
         // Clase para análisis de partida
         class AnalizadorPartida {
             constructor() {
-                this.botNick = null;
                 this.equipos = {};
                 this.jugadorEquipo = {};
                 this.puntosPorJugador = {};
-                this.scratchesPorJugador = {};
-                this.acesPorJugador = {};
-                this.palosPorJugador = {};
-                this.preguntaActual = 0;
                 this.puntosEquipo = {};
-                this.rachaActual = {};
-                this.mejorRacha = {};
-                this.jugadoresActivos = new Set();
-                this.tiemposPorPregunta = {};
-                this.respuestasPorPregunta = {};
-                this.primerAcertantePorPregunta = {};
+                this.botNick = null;
             }
 
-            identificarBot(lineas) {
+            identificarBot(contenido) {
+                const lineas = contenido.split('\n');
                 for (const linea of lineas) {
                     if (linea.includes('--- Equipos participantes ---')) {
                         const match = linea.match(/<([^>]+)>/);
@@ -323,7 +341,8 @@
                 }
             }
 
-            procesarEquipos(lineas) {
+            procesarEquipos(contenido) {
+                const lineas = contenido.split('\n');
                 let dentroEquipos = false;
                 let equipoActual = null;
 
@@ -340,7 +359,6 @@
 
                     if (dentroEquipos && this.botNick && linea.includes(`<${this.botNick}>`)) {
                         if (!linea.includes('>>>')) {
-                            // Es un nombre de equipo
                             const equipos = ['FOGUETES', 'LIDERES', 'KAMIKAZES', 'ATIPIK@S', 'REPESCA@S', 'HARDBE@TS', 'TELERINEZ'];
                             for (const eq of equipos) {
                                 if (linea.includes(eq)) {
@@ -351,7 +369,6 @@
                                 }
                             }
                         } else if (linea.includes('>>>') && equipoActual) {
-                            // Lista de jugadores
                             const match = linea.match(/>>>\s*(.+)/);
                             if (match) {
                                 const jugadores = match[1].trim().split(/\s+/);
@@ -359,11 +376,6 @@
                                 jugadores.forEach(j => {
                                     this.jugadorEquipo[j] = equipoActual;
                                     this.puntosPorJugador[j] = 0;
-                                    this.scratchesPorJugador[j] = 0;
-                                    this.acesPorJugador[j] = 0;
-                                    this.palosPorJugador[j] = 0;
-                                    this.rachaActual[j] = 0;
-                                    this.mejorRacha[j] = 0;
                                 });
                             }
                         }
@@ -371,430 +383,316 @@
                 }
             }
 
-            procesarLinea(linea, indice) {
-                // Detectar actividad de jugadores
-                const matchJugador = linea.match(/<([^>]+)>\s+(.+)/);
-                if (matchJugador && matchJugador[1] !== this.botNick) {
-                    const nick = matchJugador[1];
-                    if (this.jugadorEquipo[nick]) {
-                        this.jugadoresActivos.add(nick);
-                    }
-                }
+            procesarHasta(contenido) {
+                const lineas = contenido.split('\n');
+                for (const linea of lineas) {
+                    if (!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
 
-                if (!this.botNick || !linea.includes(`<${this.botNick}>`)) {
-                    return;
-                }
+                    // Detectar aciertos
+                    const matchScratch = linea.match(/>>>(\S+)\s+scratchea/);
+                    const matchAce = linea.match(/>>>(\S+)\s+acea/);
+                    const matchAcierto = linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/);
 
-                // Detectar número de pregunta
-                const matchPregunta = linea.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/);
-                if (matchPregunta) {
-                    this.preguntaActual = parseInt(matchPregunta[1]);
-                    const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
-                    if (matchTimestamp) {
-                        this.tiemposPorPregunta[this.preguntaActual] = {
-                            inicio: matchTimestamp[1],
-                            primerAcierto: null
-                        };
-                    }
-                    this.respuestasPorPregunta[this.preguntaActual] = [];
-                }
+                    let jugador = null;
+                    if (matchScratch) jugador = matchScratch[1];
+                    else if (matchAce) jugador = matchAce[1];
+                    else if (matchAcierto) jugador = matchAcierto[1];
 
-                // Detectar scratch
-                const matchScratch = linea.match(/>>>(\S+)\s+scratchea/);
-                if (matchScratch) {
-                    const jugador = matchScratch[1];
-                    this.procesarAcierto(jugador, 'scratch', linea);
-                }
-
-                // Detectar ace
-                const matchAce = linea.match(/>>>(\S+)\s+acea/);
-                if (matchAce) {
-                    const jugador = matchAce[1];
-                    this.procesarAcierto(jugador, 'ace', linea);
-                }
-
-                // Detectar acierto normal
-                const matchAcierto = linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/);
-                if (matchAcierto) {
-                    const jugador = matchAcierto[1];
-                    this.procesarAcierto(jugador, 'normal', linea);
-                }
-
-                // Detectar palo
-                const matchPalo = linea.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/);
-                if (matchPalo) {
-                    const jugador = matchPalo[1];
-                    if (this.palosPorJugador[jugador] !== undefined) {
-                        this.palosPorJugador[jugador]++;
-                        this.rachaActual[jugador] = 0;
-                    }
-                }
-
-                // Detectar respuesta correcta
-                const matchRespuesta = linea.match(/La buena:|Las buenas:/);
-                if (matchRespuesta && this.preguntaActual) {
-                    const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
-                    if (matchTimestamp && this.tiemposPorPregunta[this.preguntaActual]) {
-                        this.tiemposPorPregunta[this.preguntaActual].respuesta = matchTimestamp[1];
-                    }
-                }
-            }
-
-            procesarAcierto(jugador, tipo, linea) {
-                if (this.puntosPorJugador[jugador] !== undefined) {
-                    this.puntosPorJugador[jugador]++;
-                    
-                    if (this.jugadorEquipo[jugador]) {
-                        this.puntosEquipo[this.jugadorEquipo[jugador]]++;
-                    }
-
-                    if (tipo === 'scratch') {
-                        this.scratchesPorJugador[jugador]++;
-                        if (!this.primerAcertantePorPregunta[this.preguntaActual]) {
-                            this.primerAcertantePorPregunta[this.preguntaActual] = jugador;
-                            const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
-                            if (matchTimestamp && this.tiemposPorPregunta[this.preguntaActual]) {
-                                this.tiemposPorPregunta[this.preguntaActual].primerAcierto = matchTimestamp[1];
-                            }
-                        }
-                    } else if (tipo === 'ace') {
-                        this.acesPorJugador[jugador]++;
-                        this.scratchesPorJugador[jugador]++;
-                    }
-
-                    // Actualizar racha
-                    this.rachaActual[jugador]++;
-                    if (this.rachaActual[jugador] > this.mejorRacha[jugador]) {
-                        this.mejorRacha[jugador] = this.rachaActual[jugador];
-                    }
-
-                    this.respuestasPorPregunta[this.preguntaActual].push(jugador);
-                }
-            }
-
-            calcularTiempoRespuesta(pregunta) {
-                const tiempos = this.tiemposPorPregunta[pregunta];
-                if (!tiempos || !tiempos.inicio || !tiempos.primerAcierto) {
-                    return null;
-                }
-
-                const [h1, m1, s1] = tiempos.inicio.split(':').map(Number);
-                const [h2, m2, s2] = tiempos.primerAcierto.split(':').map(Number);
-                
-                const segundos1 = h1 * 3600 + m1 * 60 + s1;
-                const segundos2 = h2 * 3600 + m2 * 60 + s2;
-                
-                let diferencia = segundos2 - segundos1;
-                if (diferencia < 0) diferencia += 86400; // Cambio de día
-                
-                return diferencia;
-            }
-
-            obtenerPreguntaMasRapida() {
-                let masRapida = null;
-                let menorTiempo = Infinity;
-
-                for (const pregunta in this.tiemposPorPregunta) {
-                    const tiempo = this.calcularTiempoRespuesta(pregunta);
-                    if (tiempo !== null && tiempo < menorTiempo) {
-                        menorTiempo = tiempo;
-                        masRapida = {
-                            pregunta: pregunta,
-                            tiempo: tiempo,
-                            jugador: this.primerAcertantePorPregunta[pregunta]
-                        };
-                    }
-                }
-
-                return masRapida;
-            }
-
-            obtenerPreguntaMasLenta() {
-                let masLenta = null;
-                let mayorTiempo = 0;
-
-                for (const pregunta in this.tiemposPorPregunta) {
-                    const tiempo = this.calcularTiempoRespuesta(pregunta);
-                    if (tiempo !== null && tiempo > mayorTiempo) {
-                        mayorTiempo = tiempo;
-                        masLenta = {
-                            pregunta: pregunta,
-                            tiempo: tiempo,
-                            jugador: this.primerAcertantePorPregunta[pregunta]
-                        };
-                    }
-                }
-
-                return masLenta;
-            }
-
-            obtenerMarcadorActual() {
-                const equipos = Object.keys(this.puntosEquipo);
-                if (equipos.length !== 2) return null;
-
-                return {
-                    [equipos[0]]: this.puntosEquipo[equipos[0]],
-                    [equipos[1]]: this.puntosEquipo[equipos[1]]
-                };
-            }
-
-            obtenerTopJugadores(n = 5) {
-                return Object.entries(this.puntosPorJugador)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, n)
-                    .map(([jugador, puntos]) => ({ jugador, puntos }));
-            }
-
-            obtenerAusencias() {
-                const ausentes = [];
-                for (const equipo in this.equipos) {
-                    for (const jugador of this.equipos[equipo]) {
-                        if (!this.jugadoresActivos.has(jugador)) {
-                            ausentes.push({ jugador, equipo });
+                    if (jugador && this.puntosPorJugador[jugador] !== undefined) {
+                        this.puntosPorJugador[jugador]++;
+                        if (this.jugadorEquipo[jugador]) {
+                            this.puntosEquipo[this.jugadorEquipo[jugador]]++;
                         }
                     }
                 }
-                return ausentes;
             }
 
-            detectarRachasCortadas(proximaPregunta) {
-                const rachasCortadas = [];
-                for (const jugador in this.rachaActual) {
-                    if (this.rachaActual[jugador] >= 7) {
-                        // Si no aparece en la siguiente pregunta, se cortó la racha
-                        if (!this.respuestasPorPregunta[proximaPregunta]?.includes(jugador)) {
-                            rachasCortadas.push({
-                                jugador,
-                                racha: this.rachaActual[jugador],
-                                equipo: this.jugadorEquipo[jugador]
-                            });
-                        }
-                    }
-                }
-                return rachasCortadas;
-            }
-
-            generarDatosExtra(esPrimera, esUltima, proximaPregunta) {
+            generarResumen(esPrimera, esUltima) {
                 let extras = [];
                 
-                extras.push('\n\n');
-                extras.push('═══════════════════════════════════════════');
+                extras.push('\n\n═══════════════════════════════════════════');
                 extras.push('           📊 DATOS EXTRA DEL CORTE');
-                extras.push('═══════════════════════════════════════════');
-                extras.push('');
+                extras.push('═══════════════════════════════════════════\n');
 
-                // En la primera parte: mostrar composición de equipos
                 if (esPrimera) {
-                    extras.push('🏆 COMPOSICIÓN DE EQUIPOS:');
-                    extras.push('─────────────────────────');
+                    extras.push('🏆 EQUIPOS PARTICIPANTES:');
                     for (const equipo in this.equipos) {
-                        const jugadores = this.equipos[equipo];
-                        extras.push(`${equipo}: ${jugadores.length} jugadores`);
-                        extras.push(`  Plantilla: ${jugadores.join(', ')}`);
-                    }
-                    
-                    const ausencias = this.obtenerAusencias();
-                    if (ausencias.length > 0) {
-                        extras.push('');
-                        extras.push('⚠️ JUGADORES AUSENTES:');
-                        extras.push('─────────────────────────');
-                        ausencias.forEach(a => {
-                            extras.push(`  ${a.jugador} (${a.equipo})`);
-                        });
+                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')}`);
                     }
                     extras.push('');
                 }
 
-                // Marcador actual
-                const marcador = this.obtenerMarcadorActual();
-                if (marcador) {
-                    extras.push('📈 MARCADOR EN EL CORTE:');
-                    extras.push('─────────────────────────');
-                    for (const equipo in marcador) {
-                        extras.push(`  ${equipo}: ${marcador[equipo]} puntos`);
-                    }
-                    extras.push('');
+                extras.push('📈 MARCADOR ACTUAL:');
+                for (const equipo in this.puntosEquipo) {
+                    extras.push(`${equipo}: ${this.puntosEquipo[equipo]} puntos`);
                 }
 
-                // Top jugadores
-                const topJugadores = this.obtenerTopJugadores(5);
-                if (topJugadores.length > 0) {
-                    extras.push('🥇 TOP 5 JUGADORES:');
-                    extras.push('─────────────────────────');
-                    topJugadores.forEach((j, i) => {
-                        extras.push(`  ${i + 1}. ${j.jugador}: ${j.puntos} puntos`);
-                    });
-                    extras.push('');
-                }
-
-                // Rachas cortadas
-                if (proximaPregunta) {
-                    const rachasCortadas = this.detectarRachasCortadas(proximaPregunta);
-                    if (rachasCortadas.length > 0) {
-                        extras.push('⚡ RACHAS IMPORTANTES CORTADAS:');
-                        extras.push('─────────────────────────');
-                        rachasCortadas.forEach(r => {
-                            extras.push(`  ${r.jugador} (${r.equipo}): Racha de ${r.racha} cortada`);
-                        });
-                        extras.push('');
-                    }
-                }
-
-                // En la última parte: estadísticas completas
                 if (esUltima) {
-                    extras.push('📊 ESTADÍSTICAS FINALES COMPLETAS:');
-                    extras.push('═══════════════════════════════════');
-                    extras.push('');
-
-                    // Puntos por jugador
-                    extras.push('PUNTOS:');
-                    extras.push('─────────────────────────');
+                    extras.push('\n🥇 PUNTUACIÓN INDIVIDUAL:');
                     const jugadoresOrdenados = Object.entries(this.puntosPorJugador)
                         .filter(([j, p]) => p > 0)
                         .sort((a, b) => b[1] - a[1]);
                     
                     jugadoresOrdenados.forEach(([j, p]) => {
-                        extras.push(`  ${j}: ${p}`);
+                        extras.push(`${j}: ${p} puntos`);
                     });
-                    extras.push('');
-
-                    // Scratches
-                    const scratches = Object.entries(this.scratchesPorJugador)
-                        .filter(([j, s]) => s > 0)
-                        .sort((a, b) => b[1] - a[1]);
-                    
-                    if (scratches.length > 0) {
-                        extras.push('SCRATCHES:');
-                        extras.push('─────────────────────────');
-                        scratches.forEach(([j, s]) => {
-                            extras.push(`  ${j}: ${s}`);
-                        });
-                        extras.push('');
-                    }
-
-                    // Aces
-                    const aces = Object.entries(this.acesPorJugador)
-                        .filter(([j, a]) => a > 0)
-                        .sort((a, b) => b[1] - a[1]);
-                    
-                    if (aces.length > 0) {
-                        extras.push('ACES:');
-                        extras.push('─────────────────────────');
-                        aces.forEach(([j, a]) => {
-                            extras.push(`  ${j}: ${a}`);
-                        });
-                        extras.push('');
-                    }
-
-                    // Palos
-                    const palos = Object.entries(this.palosPorJugador)
-                        .filter(([j, p]) => p > 0)
-                        .sort((a, b) => b[1] - a[1]);
-                    
-                    if (palos.length > 0) {
-                        extras.push('PALOS:');
-                        extras.push('─────────────────────────');
-                        palos.forEach(([j, p]) => {
-                            extras.push(`  ${j}: ${p}`);
-                        });
-                        extras.push('');
-                    }
-
-                    // Preguntas más rápida y más lenta
-                    const masRapida = this.obtenerPreguntaMasRapida();
-                    const masLenta = this.obtenerPreguntaMasLenta();
-
-                    if (masRapida || masLenta) {
-                        extras.push('⏱️ TIEMPOS DESTACADOS:');
-                        extras.push('─────────────────────────');
-                        if (masRapida) {
-                            extras.push(`  Pregunta más rápida: P${masRapida.pregunta} (${masRapida.tiempo}s) - ${masRapida.jugador}`);
-                        }
-                        if (masLenta) {
-                            extras.push(`  Pregunta más lenta: P${masLenta.pregunta} (${masLenta.tiempo}s) - ${masLenta.jugador}`);
-                        }
-                        extras.push('');
-                    }
-
-                    // Mejores rachas
-                    const rachas = Object.entries(this.mejorRacha)
-                        .filter(([j, r]) => r >= 5)
-                        .sort((a, b) => b[1] - a[1]);
-                    
-                    if (rachas.length > 0) {
-                        extras.push('🔥 MEJORES RACHAS:');
-                        extras.push('─────────────────────────');
-                        rachas.forEach(([j, r]) => {
-                            extras.push(`  ${j}: ${r} consecutivas`);
-                        });
-                        extras.push('');
-                    }
                 }
 
-                extras.push('═══════════════════════════════════════════');
-                extras.push('\n');
-
+                extras.push('\n═══════════════════════════════════════════\n');
                 return extras.join('\n');
             }
         }
 
-        // Elementos del DOM
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const processBtn = document.getElementById('processBtn');
-        const statusDiv = document.getElementById('status');
-        const resultsDiv = document.getElementById('results');
-        const numPartsInput = document.getElementById('numParts');
-        const cleanIRCCheckbox = document.getElementById('cleanIRC');
-        const addExtrasCheckbox = document.getElementById('addExtras');
-        const uploadText = document.getElementById('uploadText');
+        // Funciones de limpieza (del código que funcionaba)
+        function limpiarLinea(linea) {
+            return linea
+                .replace(/\x03\d{1,2}(?:,\d{1,2})?/g, "")   // Colores
+                .replace(/\x02/g, "")                       // Negrita
+                .replace(/\x1D/g, "")                       // Cursiva
+                .replace(/\x1F/g, "")                       // Subrayado
+                .replace(/\x0F/g, "")                       // Reset
+                .replace(/\x7F/g, "")                       // Delete
+                .replace(/\b\d{1,2},\d{1,2}\b/g, "")        // Coordenadas tipo 2,9
+                .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "") // ANSI
+                .replace(/\s{2,}/g, " ")                    // Espacios múltiples
+                .replace(/^[:\?]\s*/, "")                   // Residuales al inicio
+                .trim();
+        }
 
-        // Event listeners
-        uploadArea.addEventListener('click', (e) => {
-            e.preventDefault();
-            fileInput.click();
-        });
-        
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            uploadArea.classList.remove('dragover');
+        function limpiarArchivo(contenido) {
+            return contenido
+                .split("\n")
+                .map(limpiarLinea)
+                .join("\n");
+        }
+
+        // Detectar preguntas
+        function encontrarPosicionesPreguntas(contenido) {
+            const lineas = contenido.split("\n");
+            const posiciones = [];
+            lineas.forEach((linea, i) => {
+                if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(linea)) {
+                    posiciones.push(i);
+                }
+            });
+            return posiciones;
+        }
+
+        // División en partes
+        function dividirArchivo(contenido, numPartes = 4) {
+            const lineas = contenido.split("\n");
+            const posiciones = encontrarPosicionesPreguntas(contenido);
             
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                handleFileSelect(files[0]);
+            if (posiciones.length === 0) {
+                throw new Error("No se encontraron preguntas en el archivo");
             }
-        });
-        
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleFileSelect(e.target.files[0]);
-            }
-        });
-        
-        processBtn.addEventListener('click', processFile);
 
-        function handleFileSelect(file) {
-            console.log('Archivo seleccionado:', file.name);
+            const totalLineas = lineas.length;
+            const lineasPorParte = Math.floor(totalLineas / numPartes);
+            const cortes = [];
+            let ultimoCorte = 0;
+
+            for (let i = 1; i < numPartes; i++) {
+                const lineaObjetivo = i * lineasPorParte;
+                let mejorPos = ultimoCorte;
+                for (const pos of posiciones) {
+                    if (pos <= lineaObjetivo && pos > ultimoCorte) {
+                        mejorPos = pos;
+                    }
+                }
+                if (mejorPos > ultimoCorte) {
+                    cortes.push(mejorPos);
+                    ultimoCorte = mejorPos;
+                }
+            }
+
+            const partes = [];
+            let inicio = 0;
+            const finales = cortes.concat([totalLineas]);
+            
+            finales.forEach((fin, idx) => {
+                const fragmento = lineas.slice(inicio, fin).join("\n");
+                partes.push({ 
+                    nombre: `parte_${String(idx + 1).padStart(2, '0')}.txt`, 
+                    contenido: fragmento,
+                    lineas: fin - inicio
+                });
+                inicio = fin;
+            });
+
+            return partes;
+        }
+
+        // Manejar archivo seleccionado
+        function handleFile(file) {
+            console.log('Archivo recibido:', file.name, file.size, file.type);
             
             if (!file.name.match(/\.(txt|log)$/i)) {
-                showStatus('Por favor, selecciona un archivo .txt o .log', 'error');
+                showMessage('Por favor selecciona un archivo .txt o .log', 'error');
                 return;
             }
-            
+
             selectedFile = file;
             uploadText.textContent = `📎 ${file.name}`;
             uploadArea.classList.add('file-selected');
-            showStatus(`Archivo seleccionado: ${file.name} (${formatFileSize(file
+            processBtn.style.display = 'block';
+
+            showMessage('Archivo cargado correctamente: ' + file.name, 'success');
+        }
+
+        // Procesar log principal
+        function processLog() {
+            if (!selectedFile) {
+                showMessage("Selecciona un archivo primero", 'error');
+                return;
+            }
+
+            const numPartes = parseInt(document.getElementById('numPartes').value) || 4;
+            const cleanIRC = document.getElementById('cleanIRC').checked;
+            const addExtras = document.getElementById('addExtras').checked;
+
+            showMessage('Procesando archivo...', 'success');
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    let contenido = e.target.result;
+                    
+                    // Limpiar log si está activado
+                    if (cleanIRC) {
+                        contenido = limpiarArchivo(contenido);
+                    }
+
+                    // Inicializar analizador si están activados los extras
+                    let analizador = null;
+                    if (addExtras) {
+                        analizador = new AnalizadorPartida();
+                        analizador.identificarBot(contenido);
+                        analizador.procesarEquipos(contenido);
+                    }
+
+                    // Dividir en partes
+                    const partes = dividirArchivo(contenido, numPartes);
+
+                    // Añadir extras si están activados
+                    if (addExtras && analizador) {
+                        let contenidoAcumulado = '';
+                        partes.forEach((parte, idx) => {
+                            contenidoAcumulado += parte.contenido;
+                            analizador.procesarHasta(contenidoAcumulado);
+                            
+                            const esPrimera = idx === 0;
+                            const esUltima = idx === partes.length - 1;
+                            const extras = analizador.generarResumen(esPrimera, esUltima);
+                            
+                            parte.contenido += extras;
+                        });
+                    }
+
+                    // Mostrar resultados
+                    mostrarResultados(partes, numPartes);
+
+                } catch (err) {
+                    showMessage("Error: " + err.message, 'error');
+                }
+            };
+            
+            reader.onerror = function() {
+                showMessage('Error al leer el archivo', 'error');
+            };
+            
+            reader.readAsText(selectedFile, 'utf-8');
+        }
+
+        // Mostrar resultados
+        function mostrarResultados(partes, numPartes) {
+            results.innerHTML = `<h3>📦 Archivos Generados (${numPartes} partes)</h3>`;
+
+            partes.forEach((parte, idx) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item';
+                
+                const info = document.createElement('div');
+                info.innerHTML = `<strong>${parte.nombre}</strong><br>${parte.lineas} líneas | ${formatFileSize(parte.contenido.length)}`;
+                
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'download-btn';
+                downloadBtn.textContent = 'Descargar';
+                downloadBtn.onclick = function() {
+                    descargarParte(parte.nombre, parte.contenido);
+                };
+                
+                fileItem.appendChild(info);
+                fileItem.appendChild(downloadBtn);
+                results.appendChild(fileItem);
+            });
+
+            if (partes.length > 1) {
+                const btnZip = document.createElement("button");
+                btnZip.className = "button success";
+                btnZip.textContent = "📦 Descargar todas en ZIP";
+                btnZip.onclick = function() {
+                    descargarZip(partes);
+                };
+                results.appendChild(btnZip);
+            }
+
+            results.classList.add('show');
+            showMessage(`Log procesado correctamente en ${numPartes} partes`, 'success');
+        }
+
+        // Descargas
+        function descargarParte(nombre, contenido) {
+            const blob = new Blob([contenido], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = nombre;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        async function descargarZip(partes) {
+            try {
+                showMessage('Generando archivo ZIP...', 'success');
+                const zip = new JSZip();
+                partes.forEach(parte => {
+                    zip.file(parte.nombre, parte.contenido);
+                });
+                const blob = await zip.generateAsync({ type: "blob" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "partes_trivial.zip";
+                a.click();
+                URL.revokeObjectURL(url);
+                showMessage('ZIP descargado correctamente', 'success');
+            } catch (error) {
+                showMessage('Error al generar el archivo ZIP', 'error');
+            }
+        }
+
+        // Utilidades
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+            else return Math.round(bytes / 1048576) + ' MB';
+        }
+
+        function showMessage(msg, type) {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.textContent = msg;
+            messages.appendChild(div);
+            
+            setTimeout(function() {
+                if (div.parentNode) {
+                    div.parentNode.removeChild(div);
+                }
+            }, 5000);
+        }
+
+        console.log('Fraccionador de Logs IRC iniciado correctamente');
+    </script>
+</body>
+</html>
