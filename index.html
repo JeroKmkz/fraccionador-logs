@@ -1,569 +1,980 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Fraccionador de Logs de Trivial IRC</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
-      background-color: #f5f5f5;
-    }
-    .container {
-      background-color: white;
-      padding: 30px;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    h1 {
-      color: #333;
-      text-align: center;
-      margin-bottom: 30px;
-    }
-    .upload-section {
-      border: 2px dashed #ddd;
-      padding: 40px;
-      text-align: center;
-      margin-bottom: 30px;
-      border-radius: 8px;
-      background-color: #fafafa;
-    }
-    .upload-section:hover {
-      border-color: #007bff;
-      background-color: #f0f8ff;
-    }
-    input[type="file"], input[type="number"] {
-      margin: 20px 0;
-    }
-    .button {
-      background-color: #007bff;
-      color: white;
-      padding: 12px 25px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 16px;
-      margin: 10px;
-    }
-    .button:hover {
-      background-color: #0056b3;
-    }
-    .button:disabled {
-      background-color: #ccc;
-      cursor: not-allowed;
-    }
-    .results {
-      margin-top: 30px;
-    }
-    .error {
-      color: #dc3545;
-      background-color: #f8d7da;
-      padding: 15px;
-      border-radius: 5px;
-      margin: 20px 0;
-    }
-    .success {
-      color: #155724;
-      background-color: #d4edda;
-      padding: 15px;
-      border-radius: 5px;
-      margin: 20px 0;
-    }
-    .log-info {
-      background-color: #e9ecef;
-      padding: 15px;
-      border-radius: 5px;
-      margin: 20px 0;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fraccionador de Logs - Trivial IRC</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 700px;
+            width: 100%;
+            padding: 40px;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .upload-area {
+            border: 3px dashed #ddd;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #fafafa;
+            margin-bottom: 30px;
+        }
+
+        .upload-area:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .options {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .option-group {
+            margin-bottom: 20px;
+        }
+
+        .option-label {
+            display: block;
+            color: #555;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .option-input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        .process-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .process-btn.show {
+            display: block;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+            border: 1px solid #81c784;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .results {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .file-item {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .download-btn {
+            padding: 8px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .download-all-btn {
+            width: 100%;
+            padding: 15px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        .extras-section {
+            background: #f0f4ff;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .extras-title {
+            color: #667eea;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>🎯 Fraccionador de Logs de Trivial IRC</h1>
+    <div class="container">
+        <h1>📂 Fraccionador de Logs IRC</h1>
+        <p class="subtitle">Limpia y divide tus logs de partidas con análisis estadístico</p>
 
-    <div class="upload-section">
-      <h3>📄 Subir Log</h3>
-      <p>Sube el archivo .txt del log de una partida (con o sin códigos IRC)</p>
-      <input type="file" id="fileInputLog" accept=".txt" />
-      <br />
-      <label for="numPartes"><strong>⚙️ Número de partes:</strong></label><br/>
-      <input type="number" id="numPartes" min="2" max="20" value="4" style="width:80px; text-align:center;" />
-      <br />
-      <label for="addStats" style="display:inline-block; margin-top:6px; user-select:none;">
-        <input type="checkbox" id="addStats" />
-        Añadir estadísticas
-      </label>
-      <br />
-      <button class="button" onclick="processLog()" id="processLogBtn">Procesar Log</button>
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">📁</div>
+            <div>Arrastra tu archivo aquí o haz clic para seleccionar</div>
+            <input type="file" id="fileInput" class="file-input" accept=".txt,.log">
+        </div>
+
+        <div class="options">
+            <div class="option-group">
+                <label class="option-label" for="numParts">Número de partes:</label>
+                <input type="number" id="numParts" class="option-input" min="2" max="20" value="4">
+            </div>
+            
+            <div class="option-group">
+                <div class="checkbox-group">
+                    <input type="checkbox" id="cleanIRC" checked>
+                    <label for="cleanIRC">Limpiar códigos IRC</label>
+                </div>
+            </div>
+
+            <div class="extras-section">
+                <div class="extras-title">📊 Análisis Extra (para Cronista)</div>
+                <div class="checkbox-group">
+                    <input type="checkbox" id="addExtras">
+                    <label for="addExtras">Añadir estadísticas y análisis en cada corte</label>
+                </div>
+            </div>
+        </div>
+
+        <button id="processBtn" class="process-btn">Procesar Archivo</button>
+        <div id="status" class="status"></div>
+        <div id="results" class="results"></div>
     </div>
 
-    <div id="results" class="results" style="display: none;"></div>
-  </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
+    <script>
+        let selectedFile = null;
+        let processedFiles = [];
 
-  <script>
-    // --- LIMPIEZA (imitando irc_log_cleaner.py) ---
-    function limpiarLinea(linea) {
-      return linea
-        .replace(/\x03\d{1,2}(?:,\d{1,2})?/g, "")   // Colores
-        .replace(/\x02/g, "")                       // Negrita
-        .replace(/\x1D/g, "")                       // Cursiva
-        .replace(/\x1F/g, "")                       // Subrayado
-        .replace(/\x0F/g, "")                       // Reset
-        .replace(/\x7F/g, "")                       // Delete
-        .replace(/\b\d{1,2},\d{1,2}\b/g, "")        // Coordenadas tipo 2,9
-        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "") // ANSI
-        .replace(/\s{2,}/g, " ")                    // Espacios múltiples
-        .replace(/^[:\?]\s*/, "")                   // Residuales al inicio
-        .trim();
-    }
-    function limpiarArchivo(contenido) {
-      return contenido
-        .split("\n")
-        .map(limpiarLinea)
-        .join("\n");
-    }
+        // Clase para análisis de partida
+        class AnalizadorPartida {
+            constructor() {
+                this.botNick = null;
+                this.equipos = {};
+                this.jugadorEquipo = {};
+                this.puntosPorJugador = {};
+                this.scratchesPorJugador = {};
+                this.acesPorJugador = {};
+                this.palosPorJugador = {};
+                this.preguntaActual = 0;
+                this.puntosEquipo = {};
+                this.rachaActual = {};
+                this.mejorRacha = {};
+                this.jugadoresActivos = new Set();
+                this.tiemposPorPregunta = {};
+                this.respuestasPorPregunta = {};
+                this.primerAcertantePorPregunta = {};
+            }
 
-    // --- DETECTAR PREGUNTAS PARA CORTES BÁSICOS ---
-    function encontrarPosicionesPreguntas(contenido) {
-      const lineas = contenido.split("\n");
-      const posiciones = [];
-      lineas.forEach((linea, i) => {
-        if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(linea)) {
-          posiciones.push(i);
+            identificarBot(lineas) {
+                for (const linea of lineas) {
+                    if (linea.includes('--- Equipos participantes ---')) {
+                        const match = linea.match(/<([^>]+)>/);
+                        if (match) {
+                            this.botNick = match[1];
+                            return;
+                        }
+                    }
+                }
+            }
+
+            procesarEquipos(lineas) {
+                let dentroEquipos = false;
+                let equipoActual = null;
+
+                for (const linea of lineas) {
+                    if (linea.includes('--- Equipos participantes ---')) {
+                        dentroEquipos = true;
+                        continue;
+                    }
+                    
+                    if (linea.includes('--- DATOS RESETEADOS ---')) {
+                        dentroEquipos = false;
+                        break;
+                    }
+
+                    if (dentroEquipos && this.botNick && linea.includes(`<${this.botNick}>`)) {
+                        if (!linea.includes('>>>')) {
+                            // Es un nombre de equipo
+                            const equipos = ['FOGUETES', 'LIDERES', 'KAMIKAZES', 'ATIPIK@S', 'REPESCA@S', 'HARDBE@TS', 'TELERINEZ'];
+                            for (const eq of equipos) {
+                                if (linea.includes(eq)) {
+                                    equipoActual = eq;
+                                    this.equipos[equipoActual] = [];
+                                    this.puntosEquipo[equipoActual] = 0;
+                                    break;
+                                }
+                            }
+                        } else if (linea.includes('>>>') && equipoActual) {
+                            // Lista de jugadores
+                            const match = linea.match(/>>>\s*(.+)/);
+                            if (match) {
+                                const jugadores = match[1].trim().split(/\s+/);
+                                this.equipos[equipoActual] = jugadores;
+                                jugadores.forEach(j => {
+                                    this.jugadorEquipo[j] = equipoActual;
+                                    this.puntosPorJugador[j] = 0;
+                                    this.scratchesPorJugador[j] = 0;
+                                    this.acesPorJugador[j] = 0;
+                                    this.palosPorJugador[j] = 0;
+                                    this.rachaActual[j] = 0;
+                                    this.mejorRacha[j] = 0;
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            procesarLinea(linea, indice) {
+                // Detectar actividad de jugadores
+                const matchJugador = linea.match(/<([^>]+)>\s+(.+)/);
+                if (matchJugador && matchJugador[1] !== this.botNick) {
+                    const nick = matchJugador[1];
+                    if (this.jugadorEquipo[nick]) {
+                        this.jugadoresActivos.add(nick);
+                    }
+                }
+
+                if (!this.botNick || !linea.includes(`<${this.botNick}>`)) {
+                    return;
+                }
+
+                // Detectar número de pregunta
+                const matchPregunta = linea.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/);
+                if (matchPregunta) {
+                    this.preguntaActual = parseInt(matchPregunta[1]);
+                    const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
+                    if (matchTimestamp) {
+                        this.tiemposPorPregunta[this.preguntaActual] = {
+                            inicio: matchTimestamp[1],
+                            primerAcierto: null
+                        };
+                    }
+                    this.respuestasPorPregunta[this.preguntaActual] = [];
+                }
+
+                // Detectar scratch
+                const matchScratch = linea.match(/>>>(\S+)\s+scratchea/);
+                if (matchScratch) {
+                    const jugador = matchScratch[1];
+                    this.procesarAcierto(jugador, 'scratch', linea);
+                }
+
+                // Detectar ace
+                const matchAce = linea.match(/>>>(\S+)\s+acea/);
+                if (matchAce) {
+                    const jugador = matchAce[1];
+                    this.procesarAcierto(jugador, 'ace', linea);
+                }
+
+                // Detectar acierto normal
+                const matchAcierto = linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/);
+                if (matchAcierto) {
+                    const jugador = matchAcierto[1];
+                    this.procesarAcierto(jugador, 'normal', linea);
+                }
+
+                // Detectar palo
+                const matchPalo = linea.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/);
+                if (matchPalo) {
+                    const jugador = matchPalo[1];
+                    if (this.palosPorJugador[jugador] !== undefined) {
+                        this.palosPorJugador[jugador]++;
+                        this.rachaActual[jugador] = 0;
+                    }
+                }
+
+                // Detectar respuesta correcta
+                const matchRespuesta = linea.match(/La buena:|Las buenas:/);
+                if (matchRespuesta && this.preguntaActual) {
+                    const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
+                    if (matchTimestamp && this.tiemposPorPregunta[this.preguntaActual]) {
+                        this.tiemposPorPregunta[this.preguntaActual].respuesta = matchTimestamp[1];
+                    }
+                }
+            }
+
+            procesarAcierto(jugador, tipo, linea) {
+                if (this.puntosPorJugador[jugador] !== undefined) {
+                    this.puntosPorJugador[jugador]++;
+                    
+                    if (this.jugadorEquipo[jugador]) {
+                        this.puntosEquipo[this.jugadorEquipo[jugador]]++;
+                    }
+
+                    if (tipo === 'scratch') {
+                        this.scratchesPorJugador[jugador]++;
+                        if (!this.primerAcertantePorPregunta[this.preguntaActual]) {
+                            this.primerAcertantePorPregunta[this.preguntaActual] = jugador;
+                            const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
+                            if (matchTimestamp && this.tiemposPorPregunta[this.preguntaActual]) {
+                                this.tiemposPorPregunta[this.preguntaActual].primerAcierto = matchTimestamp[1];
+                            }
+                        }
+                    } else if (tipo === 'ace') {
+                        this.acesPorJugador[jugador]++;
+                        this.scratchesPorJugador[jugador]++;
+                    }
+
+                    // Actualizar racha
+                    this.rachaActual[jugador]++;
+                    if (this.rachaActual[jugador] > this.mejorRacha[jugador]) {
+                        this.mejorRacha[jugador] = this.rachaActual[jugador];
+                    }
+
+                    this.respuestasPorPregunta[this.preguntaActual].push(jugador);
+                }
+            }
+
+            calcularTiempoRespuesta(pregunta) {
+                const tiempos = this.tiemposPorPregunta[pregunta];
+                if (!tiempos || !tiempos.inicio || !tiempos.primerAcierto) {
+                    return null;
+                }
+
+                const [h1, m1, s1] = tiempos.inicio.split(':').map(Number);
+                const [h2, m2, s2] = tiempos.primerAcierto.split(':').map(Number);
+                
+                const segundos1 = h1 * 3600 + m1 * 60 + s1;
+                const segundos2 = h2 * 3600 + m2 * 60 + s2;
+                
+                let diferencia = segundos2 - segundos1;
+                if (diferencia < 0) diferencia += 86400; // Cambio de día
+                
+                return diferencia;
+            }
+
+            obtenerPreguntaMasRapida() {
+                let masRapida = null;
+                let menorTiempo = Infinity;
+
+                for (const pregunta in this.tiemposPorPregunta) {
+                    const tiempo = this.calcularTiempoRespuesta(pregunta);
+                    if (tiempo !== null && tiempo < menorTiempo) {
+                        menorTiempo = tiempo;
+                        masRapida = {
+                            pregunta: pregunta,
+                            tiempo: tiempo,
+                            jugador: this.primerAcertantePorPregunta[pregunta]
+                        };
+                    }
+                }
+
+                return masRapida;
+            }
+
+            obtenerPreguntaMasLenta() {
+                let masLenta = null;
+                let mayorTiempo = 0;
+
+                for (const pregunta in this.tiemposPorPregunta) {
+                    const tiempo = this.calcularTiempoRespuesta(pregunta);
+                    if (tiempo !== null && tiempo > mayorTiempo) {
+                        mayorTiempo = tiempo;
+                        masLenta = {
+                            pregunta: pregunta,
+                            tiempo: tiempo,
+                            jugador: this.primerAcertantePorPregunta[pregunta]
+                        };
+                    }
+                }
+
+                return masLenta;
+            }
+
+            obtenerMarcadorActual() {
+                const equipos = Object.keys(this.puntosEquipo);
+                if (equipos.length !== 2) return null;
+
+                return {
+                    [equipos[0]]: this.puntosEquipo[equipos[0]],
+                    [equipos[1]]: this.puntosEquipo[equipos[1]]
+                };
+            }
+
+            obtenerTopJugadores(n = 5) {
+                return Object.entries(this.puntosPorJugador)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, n)
+                    .map(([jugador, puntos]) => ({ jugador, puntos }));
+            }
+
+            obtenerAusencias() {
+                const ausentes = [];
+                for (const equipo in this.equipos) {
+                    for (const jugador of this.equipos[equipo]) {
+                        if (!this.jugadoresActivos.has(jugador)) {
+                            ausentes.push({ jugador, equipo });
+                        }
+                    }
+                }
+                return ausentes;
+            }
+
+            detectarRachasCortadas(proximaPregunta) {
+                const rachasCortadas = [];
+                for (const jugador in this.rachaActual) {
+                    if (this.rachaActual[jugador] >= 7) {
+                        // Si no aparece en la siguiente pregunta, se cortó la racha
+                        if (!this.respuestasPorPregunta[proximaPregunta]?.includes(jugador)) {
+                            rachasCortadas.push({
+                                jugador,
+                                racha: this.rachaActual[jugador],
+                                equipo: this.jugadorEquipo[jugador]
+                            });
+                        }
+                    }
+                }
+                return rachasCortadas;
+            }
+
+            generarDatosExtra(esPrimera, esUltima, proximaPregunta) {
+                let extras = [];
+                
+                extras.push('\n\n');
+                extras.push('═══════════════════════════════════════════');
+                extras.push('           📊 DATOS EXTRA DEL CORTE');
+                extras.push('═══════════════════════════════════════════');
+                extras.push('');
+
+                // En la primera parte: mostrar composición de equipos
+                if (esPrimera) {
+                    extras.push('🏆 COMPOSICIÓN DE EQUIPOS:');
+                    extras.push('─────────────────────────');
+                    for (const equipo in this.equipos) {
+                        const jugadores = this.equipos[equipo];
+                        extras.push(`${equipo}: ${jugadores.length} jugadores`);
+                        extras.push(`  Plantilla: ${jugadores.join(', ')}`);
+                    }
+                    
+                    const ausencias = this.obtenerAusencias();
+                    if (ausencias.length > 0) {
+                        extras.push('');
+                        extras.push('⚠️ JUGADORES AUSENTES:');
+                        extras.push('─────────────────────────');
+                        ausencias.forEach(a => {
+                            extras.push(`  ${a.jugador} (${a.equipo})`);
+                        });
+                    }
+                    extras.push('');
+                }
+
+                // Marcador actual
+                const marcador = this.obtenerMarcadorActual();
+                if (marcador) {
+                    extras.push('📈 MARCADOR EN EL CORTE:');
+                    extras.push('─────────────────────────');
+                    for (const equipo in marcador) {
+                        extras.push(`  ${equipo}: ${marcador[equipo]} puntos`);
+                    }
+                    extras.push('');
+                }
+
+                // Top jugadores
+                const topJugadores = this.obtenerTopJugadores(5);
+                if (topJugadores.length > 0) {
+                    extras.push('🥇 TOP 5 JUGADORES:');
+                    extras.push('─────────────────────────');
+                    topJugadores.forEach((j, i) => {
+                        extras.push(`  ${i + 1}. ${j.jugador}: ${j.puntos} puntos`);
+                    });
+                    extras.push('');
+                }
+
+                // Rachas cortadas
+                if (proximaPregunta) {
+                    const rachasCortadas = this.detectarRachasCortadas(proximaPregunta);
+                    if (rachasCortadas.length > 0) {
+                        extras.push('⚡ RACHAS IMPORTANTES CORTADAS:');
+                        extras.push('─────────────────────────');
+                        rachasCortadas.forEach(r => {
+                            extras.push(`  ${r.jugador} (${r.equipo}): Racha de ${r.racha} cortada`);
+                        });
+                        extras.push('');
+                    }
+                }
+
+                // En la última parte: estadísticas completas
+                if (esUltima) {
+                    extras.push('📊 ESTADÍSTICAS FINALES COMPLETAS:');
+                    extras.push('═══════════════════════════════════');
+                    extras.push('');
+
+                    // Puntos por jugador
+                    extras.push('PUNTOS:');
+                    extras.push('─────────────────────────');
+                    const jugadoresOrdenados = Object.entries(this.puntosPorJugador)
+                        .filter(([j, p]) => p > 0)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    jugadoresOrdenados.forEach(([j, p]) => {
+                        extras.push(`  ${j}: ${p}`);
+                    });
+                    extras.push('');
+
+                    // Scratches
+                    const scratches = Object.entries(this.scratchesPorJugador)
+                        .filter(([j, s]) => s > 0)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    if (scratches.length > 0) {
+                        extras.push('SCRATCHES:');
+                        extras.push('─────────────────────────');
+                        scratches.forEach(([j, s]) => {
+                            extras.push(`  ${j}: ${s}`);
+                        });
+                        extras.push('');
+                    }
+
+                    // Aces
+                    const aces = Object.entries(this.acesPorJugador)
+                        .filter(([j, a]) => a > 0)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    if (aces.length > 0) {
+                        extras.push('ACES:');
+                        extras.push('─────────────────────────');
+                        aces.forEach(([j, a]) => {
+                            extras.push(`  ${j}: ${a}`);
+                        });
+                        extras.push('');
+                    }
+
+                    // Palos
+                    const palos = Object.entries(this.palosPorJugador)
+                        .filter(([j, p]) => p > 0)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    if (palos.length > 0) {
+                        extras.push('PALOS:');
+                        extras.push('─────────────────────────');
+                        palos.forEach(([j, p]) => {
+                            extras.push(`  ${j}: ${p}`);
+                        });
+                        extras.push('');
+                    }
+
+                    // Preguntas más rápida y más lenta
+                    const masRapida = this.obtenerPreguntaMasRapida();
+                    const masLenta = this.obtenerPreguntaMasLenta();
+
+                    if (masRapida || masLenta) {
+                        extras.push('⏱️ TIEMPOS DESTACADOS:');
+                        extras.push('─────────────────────────');
+                        if (masRapida) {
+                            extras.push(`  Pregunta más rápida: P${masRapida.pregunta} (${masRapida.tiempo}s) - ${masRapida.jugador}`);
+                        }
+                        if (masLenta) {
+                            extras.push(`  Pregunta más lenta: P${masLenta.pregunta} (${masLenta.tiempo}s) - ${masLenta.jugador}`);
+                        }
+                        extras.push('');
+                    }
+
+                    // Mejores rachas
+                    const rachas = Object.entries(this.mejorRacha)
+                        .filter(([j, r]) => r >= 5)
+                        .sort((a, b) => b[1] - a[1]);
+                    
+                    if (rachas.length > 0) {
+                        extras.push('🔥 MEJORES RACHAS:');
+                        extras.push('─────────────────────────');
+                        rachas.forEach(([j, r]) => {
+                            extras.push(`  ${j}: ${r} consecutivas`);
+                        });
+                        extras.push('');
+                    }
+                }
+
+                extras.push('═══════════════════════════════════════════');
+                extras.push('\n');
+
+                return extras.join('\n');
+            }
         }
-      });
-      return posiciones;
-    }
 
-    // --- DIVISIÓN SIMPLE (sin extras) ---
-    function dividirArchivo(contenido, numPartes = 5) {
-      const lineas = contenido.split("\n");
-      const posiciones = encontrarPosicionesPreguntas(contenido);
-      if (posiciones.length === 0) {
-        throw new Error("No se encontraron preguntas en el archivo");
-      }
-      const totalLineas = lineas.length;
-      const lineasPorParte = Math.floor(totalLineas / numPartes);
-      const cortes = [];
-      let ultimoCorte = 0;
-      for (let i = 1; i < numPartes; i++) {
-        const lineaObjetivo = i * lineasPorParte;
-        let mejorPos = ultimoCorte;
-        for (const pos of posiciones) {
-          if (pos <= lineaObjetivo) mejorPos = pos;
-          else break;
-        }
-        if (mejorPos > ultimoCorte) {
-          cortes.push(mejorPos);
-          ultimoCorte = mejorPos;
-        }
-      }
-      const partes = [];
-      let inicio = 0;
-      cortes.concat([totalLineas]).forEach((fin, idx) => {
-        const fragmento = lineas.slice(inicio, fin).join("\n");
-        partes.push({ nombre: `parte_${idx+1}.txt`, contenido: fragmento });
-        inicio = fin;
-      });
-      return partes;
-    }
+        // Elementos del DOM
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const processBtn = document.getElementById('processBtn');
+        const statusDiv = document.getElementById('status');
+        const resultsDiv = document.getElementById('results');
+        const numPartsInput = document.getElementById('numParts');
+        const cleanIRCCheckbox = document.getElementById('cleanIRC');
+        const addExtrasCheckbox = document.getElementById('addExtras');
 
-    // ===== TRACKER (adaptación JS del script Python) =====
-    class TrackerPartidaJS {
-      constructor() {
-        this.bot = null;
-        this.equipos = {};              // {EQUIPO: [J1, J2, ...]}
-        this.jugadorEquipo = {};        // {JUGADOR: EQUIPO}
-        this.presentes = new Set();     // jugadores que ya han aparecido
-        this.ausentesIniciales = new Set();
-
-        this.preguntaActual = 0;
-        this.temaActual = null;
-
-        this.puntosEquipo = {};         // {EQUIPO: pts}
-        this.puntosJugador = {};        // {JUGADOR: pts}
-        this.scratches = {};            // {JUGADOR: n}
-        this.aces = {};                 // {JUGADOR: n}
-        this.palos = {};                // {JUGADOR: n}
-
-        this.rachaActual = {};          // {JUGADOR: racha}
-        this.mejorRacha = {};           // {JUGADOR: best}
-        this.cortesDeRacha = [];        // [{jugador, longitud, pregunta}]
-
-        this.acertantesPorPregunta = {}; // {num: {EQUIPO: n}}
-        this.tiemposPregunta = {};       // {num: [{t, j}]}
-        this.fastest = null;             // {t, jugador, pregunta}
-        this.slowest = null;             // {t, jugador, pregunta}
-      }
-
-      _up(map, key, inc=1){ map[key]=(map[key]||0)+inc; }
-      _ensureJugador(j){
-        if(!(j in this.puntosJugador)) this.puntosJugador[j]=0;
-        if(!(j in this.scratches)) this.scratches[j]=0;
-        if(!(j in this.aces)) this.aces[j]=0;
-        if(!(j in this.palos)) this.palos[j]=0;
-        if(!(j in this.rachaActual)) this.rachaActual[j]=0;
-        if(!(j in this.mejorRacha)) this.mejorRacha[j]=0;
-      }
-      _esc(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-
-      intentarIdentificarBot(linea){
-        if(this.bot) return;
-        const m = /<(\S+)>.*Pregunta:\s*\d+\s*\/\s*\d+/.exec(linea);
-        if(m){ this.bot = m[1]; }
-      }
-
-      _parseEquipo(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">\\s+\\d+,\\d+\\s*([A-Z@ÁÉÍÓÚÑ\\s]+)");
-        const m = re.exec(linea);
-        return m ? m[1].trim().replace(/\s+/g," ") : null;
-      }
-      _parseListaJugadores(linea){
-        const re=new RegExp("<"+this._esc(this.bot)+">.*>>>\\s*(.+)$");
-        const m=re.exec(linea);
-        if(!m) return null;
-        return m[1].trim().split(/\s+/).map(x=>x.toUpperCase());
-      }
-
-      _parsePregunta(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">.*Pregunta:\\s*(\\d+)\\s*/\\s*\\d+");
-        const m = re.exec(linea);
-        if(m){
-          this.preguntaActual = parseInt(m[1],10);
-          if(!this.acertantesPorPregunta[this.preguntaActual]){
-            this.acertantesPorPregunta[this.preguntaActual]={};
-            Object.keys(this.equipos).forEach(eq=>this.acertantesPorPregunta[this.preguntaActual][eq]=0);
-          }
-        }
-      }
-      _parseEnunciado(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">\\s+\\d+,\\d+\\s*([A-ZÁÉÍÓÚÑ\\-]+).*\\(\\s*\\d+\\s*palabra", "i");
-        const m = re.exec(linea);
-        if(m){ this.temaActual = m[1]; }
-      }
-      _parseScratch(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">.*>>>\\s*(\\S+)\\s+scratchea","i");
-        const m = re.exec(linea);
-        if(m){ this._registrarAcierto(m[1].toUpperCase(), 0, {scratch:true}); }
-      }
-      _parseAce(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">.*>>>\\s*(\\S+)\\s+acea","i");
-        const m = re.exec(linea);
-        if(m){ this._registrarAcierto(m[1].toUpperCase(), 0, {ace:true}); }
-      }
-      _parseAciertoConTiempo(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">.*>>>\\s*(\\S+)\\s+a\\s+(\\d{2})''(\\d{2})","i");
-        const m = re.exec(linea);
-        if(m){
-          const j = m[1].toUpperCase();
-          const t = parseFloat(`${m[2]}.${m[3]}`); // ss.cc
-          this._registrarAcierto(j, t, {});
-        }
-      }
-      _parsePalo(linea){
-        const re = new RegExp("<"+this._esc(this.bot)+">.*primer@?\\s+sin\\s+puntos:.*>>>\\s*(\\S+)\\s+por\\s+(\\d{2})''(\\d{2})","i");
-        const m = re.exec(linea);
-        if(m){
-          const j = m[1].toUpperCase();
-          this._ensureJugador(j);
-          this.palos[j] = (this.palos[j]||0)+1;
-          if(this.rachaActual[j] >= 3){
-            this.cortesDeRacha.push({jugador:j, longitud:this.rachaActual[j], pregunta:this.preguntaActual});
-          }
-          this.rachaActual[j] = 0;
-          this.presentes.add(j);
-        }
-      }
-
-      _registrarAcierto(jugador, tiempo, flags){
-        this._ensureJugador(jugador);
-        const eq = this.jugadorEquipo[jugador];
-        if(!eq) return;
-        this.presentes.add(jugador);
-
-        this.puntosJugador[jugador] += 1;
-        this.puntosEquipo[eq] = (this.puntosEquipo[eq]||0)+1;
-
-        if(this.preguntaActual>0){
-          this.acertantesPorPregunta[this.preguntaActual][eq] += 1;
-          if(tiempo>0){
-            if(!this.tiemposPregunta[this.preguntaActual]) this.tiemposPregunta[this.preguntaActual]=[];
-            this.tiemposPregunta[this.preguntaActual].push({t:tiempo, j:jugador});
-            if(!this.fastest || tiempo < this.fastest.t){ this.fastest = {t:tiempo, jugador, pregunta:this.preguntaActual}; }
-            if(!this.slowest || tiempo > this.slowest.t){ this.slowest = {t:tiempo, jugador, pregunta:this.preguntaActual}; }
-          }
-        }
-        if(flags.scratch){ this.scratches[jugador]++; }
-        if(flags.ace){ this.aces[jugador]++; this.scratches[jugador]++; }
-
-        this.rachaActual[jugador]++;
-        if(this.rachaActual[jugador] > this.mejorRacha[jugador]) this.mejorRacha[jugador] = this.rachaActual[jugador];
-      }
-
-      procesarLinea(linea){
-        if(!this.bot) this.intentarIdentificarBot(linea);
-        if(!this.bot) return;
-
-        if(linea.includes('--- Equipos participantes ---')){ this._enEquipos = true; return; }
-        if(this._enEquipos){
-          if(linea.includes('--- DATOS RESETEADOS ---')){
-            this._enEquipos=false;
-            Object.keys(this.equipos).forEach(eq=>{ this.puntosEquipo[eq]=0; });
-            Object.values(this.equipos).flat().forEach(j=>this.ausentesIniciales.add(j));
-            return;
-          }
-          const eq = this._parseEquipo(linea);
-          if(eq){ this._equipoActual = eq; this.equipos[eq]=[]; return; }
-          const lista = this._parseListaJugadores(linea);
-          if(lista && this._equipoActual){
-            this.equipos[this._equipoActual] = lista;
-            lista.forEach(j=> this.jugadorEquipo[j]=this._equipoActual);
-            return;
-          }
-        }
-
-        this._parsePregunta(linea);
-        this._parseEnunciado(linea);
-        this._parseScratch(linea);
-        this._parseAce(linea);
-        this._parseAciertoConTiempo(linea);
-        this._parsePalo(linea);
-      }
-
-      snapshotEnCorte(idxParte){
-        const topJug = Object.entries(this.puntosJugador)
-          .sort((a,b)=> b[1]-a[1] || a[0].localeCompare(b[0]))
-          .slice(0,10);
-        const ausentesAhora = [...this.ausentesIniciales].filter(j=>!this.presentes.has(j));
-        return {
-          idx: idxParte,
-          pregunta: this.preguntaActual,
-          puntosEquipo: {...this.puntosEquipo},
-          topJugadores: topJug,
-          ausentesAhora,
-          cortesDeRacha: this.cortesDeRacha.slice(),
-        };
-      }
-
-      renderDatosExtraParte(snapshot, esPrimeraParte, nuevasAltas){
-        const secciones = [];
-
-        if(esPrimeraParte){
-          const equiposHTML = Object.entries(this.equipos).map(([eq, lista])=>{
-            const aus = lista.filter(j=>!this.presentes.has(j));
-            return `- ${eq}: ${lista.length} (${lista.join(', ')})\n  Ausentes: ${aus.length ? aus.join(', ') : '—'}`;
-          }).join('\n');
-          secciones.push(`**Componentes por equipo (inicio):**\n${equiposHTML}`);
-        }
-
-        const marcador = Object.entries(snapshot.puntosEquipo)
-          .sort((a,b)=> b[1]-a[1])
-          .map(([eq,pts])=>`- ${eq}: ${pts}`).join('\n');
-        secciones.push(`**Marcador al corte (pregunta ${snapshot.pregunta || '—'}):**\n${marcador || '—'}`);
-
-        const top = snapshot.topJugadores.map(([j,pts],i)=>`${i+1}. ${j} — ${pts}`).join('\n') || '—';
-        secciones.push(`**Top individual al corte:**\n${top}`);
-
-        if(nuevasAltas && nuevasAltas.length){
-          secciones.push(`**Se incorporan (estaban ausentes):** ${nuevasAltas.join(', ')}`);
-        }
-
-        const rachas = snapshot.cortesDeRacha
-          .filter(r=>r.longitud>=3)
-          .map(r=>`- ${r.jugador}: se corta racha de ${r.longitud} en la pregunta ${r.pregunta}`);
-        if(rachas.length) secciones.push(`**Rachas cortadas:**\n${rachas.join('\n')}`);
-
-        if(this.fastest){
-          secciones.push(`**Respuesta más rápida hasta ahora:** ${this.fastest.jugador} — ${this.fastest.t.toFixed(2)}s (P${this.fastest.pregunta})`);
-        }
-        if(this.slowest){
-          secciones.push(`**Respuesta más lenta hasta ahora:** ${this.slowest.jugador} — ${this.slowest.t.toFixed(2)}s (P${this.slowest.pregunta})`);
-        }
-
-        return `\n\n===== DATOS EXTRA =====\n${secciones.join('\n\n')}\n=======================\n`;
-      }
-
-      renderResumenFinalJugadores(){
-        const filas = Object.keys(this.puntosJugador)
-          .sort((a,b)=> (this.jugadorEquipo[a]||'').localeCompare(this.jugadorEquipo[b]||'') || (this.puntosJugador[b]-this.puntosJugador[a]))
-          .map(j=>{
-            return `- ${j} [${this.jugadorEquipo[j]||'¿?'}]: Pts ${this.puntosJugador[j]||0} | Scr ${this.scratches[j]||0} | Ace ${this.aces[j]||0} | Palos ${this.palos[j]||0}`;
-          }).join('\n');
-        const fast = this.fastest ? `\nMás rápida: ${this.fastest.jugador} — ${this.fastest.t.toFixed(2)}s (P${this.fastest.pregunta})` : '';
-        const slow = this.slowest ? `\nMás lenta: ${this.slowest.jugador} — ${this.slowest.t.toFixed(2)}s (P${this.slowest.pregunta})` : '';
-        return `\n\n===== DATOS EXTRA (RESUMEN FINAL) =====\n${filas || '—'}${fast}${slow}\n======================================\n`;
-      }
-    }
-
-    // --- DIVISIÓN CON “DATOS EXTRA” ---
-    function dividirConDatosExtra(contenidoLimpio, numPartes){
-      const lineas = contenidoLimpio.split("\n");
-      const posiciones = [];
-      lineas.forEach((l,i)=>{ if(/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(l)) posiciones.push(i); });
-      if(posiciones.length===0) throw new Error("No se encontraron preguntas en el archivo");
-
-      const totalLineas = lineas.length;
-      const lineasPorParte = Math.floor(totalLineas/numPartes);
-      const cortes = [];
-      let ultimo = 0;
-      for(let i=1;i<numPartes;i++){
-        const objetivo = i*lineasPorParte;
-        let mejor = ultimo;
-        for(const p of posiciones){ if(p<=objetivo) mejor=p; else break; }
-        if(mejor>ultimo){ cortes.push(mejor); ultimo=mejor; }
-      }
-      const limites = cortes.concat([totalLineas]);
-
-      const tracker = new TrackerPartidaJS();
-      const partes = [];
-      let inicio = 0;
-      let idxParte = 0;
-      let nuevasAltasParte = new Set();
-
-      const registrarAltas = (antes, despues)=>{
-        const nuevas = [];
-        despues.forEach(j=>{
-          if(tracker.ausentesIniciales.has(j) && !antes.has(j)) nuevas.push(j);
+        // Event listeners
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#667eea';
         });
-        return nuevas;
-      };
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.style.borderColor = '#ddd';
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.style.borderColor = '#ddd';
+            if (e.dataTransfer.files.length > 0) {
+                handleFileSelect(e.dataTransfer.files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+        
+        processBtn.addEventListener('click', processFile);
 
-      let siguienteCorte = limites[0];
-      for(let i=0;i<lineas.length;i++){
-        const linea = lineas[i];
-        const presentesAntes = new Set(tracker.presentes);
-        tracker.procesarLinea(linea);
-        const presentesDespues = new Set(tracker.presentes);
-        registrarAltas(presentesAntes, presentesDespues).forEach(a=>nuevasAltasParte.add(a));
-
-        if(i>=siguienteCorte-1){
-          const fin = siguienteCorte;
-          const textoParte = lineas.slice(inicio, fin).join("\n");
-
-          const snap = tracker.snapshotEnCorte(idxParte+1);
-          const extras = tracker.renderDatosExtraParte(
-            snap,
-            idxParte===0,
-            [...nuevasAltasParte]
-          );
-
-          // Colocación: en la 1ª parte al principio; en el resto al final
-          const contenidoConExtras = (idxParte===0)
-            ? (extras + "\n" + textoParte)
-            : (textoParte + extras);
-
-          partes.push({
-            nombre: `parte_${idxParte+1}.txt`,
-            contenido: contenidoConExtras
-          });
-
-          idxParte++;
-          inicio = fin;
-          nuevasAltasParte.clear();
-          siguienteCorte = limites[idxParte] || totalLineas;
+        function handleFileSelect(file) {
+            if (!file.name.match(/\.(txt|log)$/i)) {
+                showStatus('Por favor, selecciona un archivo .txt o .log', 'error');
+                return;
+            }
+            selectedFile = file;
+            showStatus(`Archivo seleccionado: ${file.name}`, 'info');
+            processBtn.classList.add('show');
+            processBtn.style.display = 'block';
         }
-      }
 
-      // Resumen final en la última parte
-      if(partes.length){
-        const last = partes[partes.length-1];
-        last.contenido = last.contenido + tracker.renderResumenFinalJugadores();
-      }
-
-      return partes;
-    }
-
-    // --- DESCARGAS ---
-    function descargarParte(nombre, contenido) {
-      const blob = new Blob([contenido], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = nombre;
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-    async function descargarZip(partes) {
-      const zip = new JSZip();
-      partes.forEach(parte => { zip.file(parte.nombre, parte.contenido); });
-      const blob = await zip.generateAsync({ type: "blob" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "partes_trivial.zip";
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    // --- PROCESAR LOG ---
-    function processLog() {
-      const file = document.getElementById('fileInputLog').files[0];
-      const numPartes = parseInt(document.getElementById('numPartes').value) || 4;
-      const addStats = document.getElementById('addStats')?.checked || false;
-      if (!file) return showError("Selecciona un archivo primero");
-
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const contenido = e.target.result;
-          const limpio = limpiarArchivo(contenido);
-
-          const partes = addStats
-            ? dividirConDatosExtra(limpio, numPartes)
-            : dividirArchivo(limpio, numPartes);
-
-          const resultsDiv = document.getElementById('results');
-          resultsDiv.innerHTML = `<h3>Archivos generados (${numPartes} partes${addStats ? " + datos extra" : ""}):</h3>`;
-
-          partes.forEach((parte) => {
-            const wrapper = document.createElement("div");
-            wrapper.style.marginBottom = "6px";
-
-            const btn = document.createElement("button");
-            btn.className = "button";
-            btn.textContent = `Descargar ${parte.nombre}`;
-            btn.onclick = () => descargarParte(parte.nombre, parte.contenido);
-            wrapper.appendChild(btn);
-
-            resultsDiv.appendChild(wrapper);
-          });
-
-          const btnZip = document.createElement("button");
-          btnZip.className = "button";
-          btnZip.style.backgroundColor = "#28a745";
-          btnZip.textContent = "📦 Descargar todas en ZIP";
-          btnZip.onclick = () => descargarZip(partes);
-          resultsDiv.appendChild(btnZip);
-
-          resultsDiv.style.display = "block";
-          showSuccess(`Log limpiado y procesado correctamente en ${numPartes} partes${addStats ? " (con estadísticas)" : ""}`);
-        } catch (err) {
-          console.error(err);
-          showError("Error: " + err.message);
+        function showStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type} show`;
         }
-      };
-      reader.readAsText(file);
-    }
 
-    // --- MENSAJES ---
-    function showError(msg) {
-      const div = document.createElement("div");
-      div.className = "error";
-      div.textContent = msg;
-      document.body.appendChild(div);
-      setTimeout(() => div.remove(), 5000);
-    }
-    function showSuccess(msg) {
-      const div = document.createElement("div");
-      div.className = "success";
-      div.textContent = msg;
-      document.body.appendChild(div);
-      setTimeout(() => div.remove(), 3000);
-    }
-  </script>
-</body>
-</html>
+        function cleanIRCCodes(text) {
+            if (!cleanIRCCheckbox.checked) {
+                return text;
+            }
+            
+            text = text.replace(/\x03\d{0,2}(?:,\d{1,2})?/g, '');
+            text = text.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
+            text = text.replace(/^\d+,\d+\s+/gm, '');
+            text = text.replace(/\s{2,}/g, ' ');
+            
+            return text;
+        }
+
+        function findQuestionPositions(lines) {
+            const positions = [];
+            lines.forEach((line, index) => {
+                if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base Datos Preguntas:/i.test(line)) {
+                    positions.push(index);
+                }
+            });
+            return positions;
+        }
+
+        async function processFile() {
+            if (!selectedFile) {
+                showStatus('Por favor, selecciona un archivo primero', 'error');
+                return;
+            }
+            
+            processBtn.disabled = true;
+            processBtn.textContent = 'Procesando...';
+            
+            try {
+                const text = await readFileAsText(selectedFile);
+                const cleanedText = cleanIRCCodes(text);
+                const lines = cleanedText.split('\n');
+                const questionPositions = findQuestionPositions(lines);
+                
+                const numParts = parseInt(numPartsInput.value) || 4;
+                const parts = divideFile(lines, questionPositions, numParts);
+                
+                // Si se activan los extras, analizar la partida
+                let analizador = null;
+                if (addExtrasCheckbox.checked) {
+                    analizador = new AnalizadorPartida();
+                    analizador.identificarBot(lines);
+                    analizador.procesarEquipos(lines);
+                }
+                
+                // Generar archivos con o sin extras
+                processedFiles = [];
+                const baseName = selectedFile.name.replace(/\.(txt|log)$/i, '');
+                const extension = selectedFile.name.match(/\.(txt|log)$/i)[0];
+                
+                parts.forEach((part, index) => {
+                    let content = part.join('\n');
+                    
+                    // Si hay extras activados, añadirlos
+                    if (addExtrasCheckbox.checked && analizador) {
+                        // Procesar líneas hasta este punto
+                        const lineasHastaAqui = lines.slice(0, parts.slice(0, index + 1).reduce((a, b) => a + b.length, 0));
+                        lineasHastaAqui.forEach((linea, i) => analizador.procesarLinea(linea, i));
+                        
+                        const esPrimera = index === 0;
+                        const esUltima = index === parts.length - 1;
+                        
+                        // Detectar próxima pregunta si no es la última parte
+                        let proximaPregunta = null;
+                        if (!esUltima && index + 1 < parts.length) {
+                            const siguienteParte = parts[index + 1];
+                            for (const linea of siguienteParte) {
+                                const match = linea.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/);
+                                if (match) {
+                                    proximaPregunta = parseInt(match[1]);
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        const datosExtra = analizador.generarDatosExtra(esPrimera, esUltima, proximaPregunta);
+                        content += datosExtra;
+                    }
+                    
+                    const fileName = `${baseName}_parte_${String(index + 1).padStart(2, '0')}${extension}`;
+                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                    
+                    processedFiles.push({
+                        name: fileName,
+                        blob: blob,
+                        size: blob.size,
+                        lines: part.length
+                    });
+                });
+                
+                displayResults();
+                showStatus(`✅ Archivo procesado en ${numParts} partes`, 'success');
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+            } finally {
+                processBtn.disabled = false;
+                processBtn.textContent = 'Procesar Archivo';
+            }
+        }
+
+        function readFileAsText(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsText(file, 'utf-8');
+            });
+        }
+
+        function divideFile(lines, questionPositions, numParts) {
+            const parts = [];
+            const totalLines = lines.length;
+            
+            if (questionPositions.length > 0) {
+                const linesPerPart = Math.ceil(totalLines / numParts);
+                let lastCutPosition = 0;
+                
+                for (let i = 0; i < numParts - 1; i++) {
+                    const targetLine = (i + 1) * linesPerPart;
+                    let cutPosition = totalLines;
+                    
+                    for (const pos of questionPositions) {
+                        if (pos <= targetLine && pos > lastCutPosition) {
+                            cutPosition = pos;
+                        } else if (pos > targetLine) {
+                            break;
+                        }
+                    }
+                    
+                    if (cutPosition === totalLines && i < numParts - 1) {
+                        cutPosition = Math.min(targetLine, totalLines);
+                    }
+                    
+                    parts.push(lines.slice(lastCutPosition, cutPosition));
+                    lastCutPosition = cutPosition;
+                }
+                
+                if (lastCutPosition < totalLines) {
+                    parts.push(lines.slice(lastCutPosition));
+                }
+            } else {
+                const linesPerPart = Math.ceil(totalLines / numParts);
+                for (let i = 0; i < numParts; i++) {
+                    const start = i * linesPerPart;
+                    const end = Math.min((i + 1) * linesPerPart, totalLines);
+                    parts.push(lines.slice(start, end));
+                }
+            }
+            
+            return parts.filter(part => part.length > 0);
+        }
+
+        function displayResults() {
+            resultsDiv.innerHTML = '<h3>📦 Archivos Generados</h3>';
+            const fileList = document.createElement('ul');
+            fileList.style.listStyle = 'none';
+            fileList.style.padding = '0';
+            
+            processedFiles.forEach((file, index) => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                
+                const info = document.createElement('div');
+                info.innerHTML = `<strong>${file.name}</strong><br>${file.lines} líneas | ${formatFileSize(file.size)}`;
+                
+                const downloadBtn = document.createElement('button');
+                downloadBtn.className = 'download-btn';
+                downloadBtn.textContent = 'Descargar';
+                downloadBtn.onclick = () => downloadFile(file);
+                
+                li.appendChild(info);
+                li.appendChild(downloadBtn);
+                fileList.appendChild(li);
+            });
+            
+            resultsDiv.appendChild(fileList);
+            
+            const downloadAllBtn = document.createElement('button');
+            downloadAllBtn.className = 'download-all-btn';
+            downloadAllBtn.textContent = '⬇️ Descargar Todo (ZIP)';
+            downloadAllBtn.onclick = downloadAllAsZip;
+            resultsDiv.appendChild(downloadAllBtn);
+            
+            resultsDiv.classList.add('show');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' bytes';
+            else if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+            else return Math.round(bytes / 1048576) + ' MB';
+        }
+
+        function downloadFile(file) {
+            const url = URL.createObjectURL(file.blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function downloadAllAsZip() {
+            if (processedFiles.length === 0) return;
+            
+            const zip = new JSZip();
+            
+            for (const file of processedFiles) {
+                const content = await file.blob.text();
+                zip.file(file.name, content);
+            }
+            
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const baseName = selectedFile.name.replace(/\.(txt|log)$/i, '');
+            const zipName = `${baseName}_dividido.zip`;
+            
+            const url = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = zipName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
