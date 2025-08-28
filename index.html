@@ -31,6 +31,17 @@
             animation: slideIn 0.5s ease-out;
         }
 
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
         h1 {
             text-align: center;
             color: #333;
@@ -56,7 +67,8 @@
             margin-bottom: 30px;
         }
 
-        .upload-area:hover {
+        .upload-area:hover,
+        .upload-area.dragover {
             border-color: #667eea;
             background: #f0f0ff;
         }
@@ -121,6 +133,12 @@
             cursor: pointer;
             margin-bottom: 20px;
             display: none;
+            transition: all 0.3s ease;
+        }
+
+        .process-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .process-btn.show {
@@ -138,6 +156,18 @@
             background: #e8f5e9;
             color: #388e3c;
             border: 1px solid #81c784;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #d32f2f;
+            border: 1px solid #ef5350;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #64b5f6;
         }
 
         .status.show {
@@ -172,6 +202,11 @@
             border-radius: 6px;
             cursor: pointer;
             text-decoration: none;
+            transition: background 0.3s ease;
+        }
+
+        .download-btn:hover {
+            background: #5a67d8;
         }
 
         .download-all-btn {
@@ -185,6 +220,11 @@
             font-weight: bold;
             cursor: pointer;
             margin-top: 20px;
+            transition: background 0.3s ease;
+        }
+
+        .download-all-btn:hover {
+            background: #218838;
         }
 
         .extras-section {
@@ -200,6 +240,11 @@
             font-weight: bold;
             margin-bottom: 10px;
         }
+
+        .file-selected {
+            background: #e8f5e9;
+            border-color: #4caf50;
+        }
     </style>
 </head>
 <body>
@@ -209,7 +254,7 @@
 
         <div class="upload-area" id="uploadArea">
             <div class="upload-icon">📁</div>
-            <div>Arrastra tu archivo aquí o haz clic para seleccionar</div>
+            <div id="uploadText">Arrastra tu archivo aquí o haz clic para seleccionar</div>
             <input type="file" id="fileInput" class="file-input" accept=".txt,.log">
         </div>
 
@@ -702,24 +747,34 @@
         const numPartsInput = document.getElementById('numParts');
         const cleanIRCCheckbox = document.getElementById('cleanIRC');
         const addExtrasCheckbox = document.getElementById('addExtras');
+        const uploadText = document.getElementById('uploadText');
 
         // Event listeners
-        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('click', (e) => {
+            e.preventDefault();
+            fileInput.click();
+        });
         
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
-            uploadArea.style.borderColor = '#667eea';
+            e.stopPropagation();
+            uploadArea.classList.add('dragover');
         });
         
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.style.borderColor = '#ddd';
+        uploadArea.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
         });
         
         uploadArea.addEventListener('drop', (e) => {
             e.preventDefault();
-            uploadArea.style.borderColor = '#ddd';
-            if (e.dataTransfer.files.length > 0) {
-                handleFileSelect(e.dataTransfer.files[0]);
+            e.stopPropagation();
+            uploadArea.classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
             }
         });
         
@@ -732,249 +787,14 @@
         processBtn.addEventListener('click', processFile);
 
         function handleFileSelect(file) {
+            console.log('Archivo seleccionado:', file.name);
+            
             if (!file.name.match(/\.(txt|log)$/i)) {
                 showStatus('Por favor, selecciona un archivo .txt o .log', 'error');
                 return;
             }
+            
             selectedFile = file;
-            showStatus(`Archivo seleccionado: ${file.name}`, 'info');
-            processBtn.classList.add('show');
-            processBtn.style.display = 'block';
-        }
-
-        function showStatus(message, type = 'info') {
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${type} show`;
-        }
-
-        function cleanIRCCodes(text) {
-            if (!cleanIRCCheckbox.checked) {
-                return text;
-            }
-            
-            text = text.replace(/\x03\d{0,2}(?:,\d{1,2})?/g, '');
-            text = text.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
-            text = text.replace(/^\d+,\d+\s+/gm, '');
-            text = text.replace(/\s{2,}/g, ' ');
-            
-            return text;
-        }
-
-        function findQuestionPositions(lines) {
-            const positions = [];
-            lines.forEach((line, index) => {
-                if (/Pregunta:\s*\d+\s*\/\s*\d+.*Base Datos Preguntas:/i.test(line)) {
-                    positions.push(index);
-                }
-            });
-            return positions;
-        }
-
-        async function processFile() {
-            if (!selectedFile) {
-                showStatus('Por favor, selecciona un archivo primero', 'error');
-                return;
-            }
-            
-            processBtn.disabled = true;
-            processBtn.textContent = 'Procesando...';
-            
-            try {
-                const text = await readFileAsText(selectedFile);
-                const cleanedText = cleanIRCCodes(text);
-                const lines = cleanedText.split('\n');
-                const questionPositions = findQuestionPositions(lines);
-                
-                const numParts = parseInt(numPartsInput.value) || 4;
-                const parts = divideFile(lines, questionPositions, numParts);
-                
-                // Si se activan los extras, analizar la partida
-                let analizador = null;
-                if (addExtrasCheckbox.checked) {
-                    analizador = new AnalizadorPartida();
-                    analizador.identificarBot(lines);
-                    analizador.procesarEquipos(lines);
-                }
-                
-                // Generar archivos con o sin extras
-                processedFiles = [];
-                const baseName = selectedFile.name.replace(/\.(txt|log)$/i, '');
-                const extension = selectedFile.name.match(/\.(txt|log)$/i)[0];
-                
-                parts.forEach((part, index) => {
-                    let content = part.join('\n');
-                    
-                    // Si hay extras activados, añadirlos
-                    if (addExtrasCheckbox.checked && analizador) {
-                        // Procesar líneas hasta este punto
-                        const lineasHastaAqui = lines.slice(0, parts.slice(0, index + 1).reduce((a, b) => a + b.length, 0));
-                        lineasHastaAqui.forEach((linea, i) => analizador.procesarLinea(linea, i));
-                        
-                        const esPrimera = index === 0;
-                        const esUltima = index === parts.length - 1;
-                        
-                        // Detectar próxima pregunta si no es la última parte
-                        let proximaPregunta = null;
-                        if (!esUltima && index + 1 < parts.length) {
-                            const siguienteParte = parts[index + 1];
-                            for (const linea of siguienteParte) {
-                                const match = linea.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/);
-                                if (match) {
-                                    proximaPregunta = parseInt(match[1]);
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        const datosExtra = analizador.generarDatosExtra(esPrimera, esUltima, proximaPregunta);
-                        content += datosExtra;
-                    }
-                    
-                    const fileName = `${baseName}_parte_${String(index + 1).padStart(2, '0')}${extension}`;
-                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-                    
-                    processedFiles.push({
-                        name: fileName,
-                        blob: blob,
-                        size: blob.size,
-                        lines: part.length
-                    });
-                });
-                
-                displayResults();
-                showStatus(`✅ Archivo procesado en ${numParts} partes`, 'success');
-                
-            } catch (error) {
-                showStatus(`Error: ${error.message}`, 'error');
-            } finally {
-                processBtn.disabled = false;
-                processBtn.textContent = 'Procesar Archivo';
-            }
-        }
-
-        function readFileAsText(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = (e) => resolve(e.target.result);
-                reader.onerror = reject;
-                reader.readAsText(file, 'utf-8');
-            });
-        }
-
-        function divideFile(lines, questionPositions, numParts) {
-            const parts = [];
-            const totalLines = lines.length;
-            
-            if (questionPositions.length > 0) {
-                const linesPerPart = Math.ceil(totalLines / numParts);
-                let lastCutPosition = 0;
-                
-                for (let i = 0; i < numParts - 1; i++) {
-                    const targetLine = (i + 1) * linesPerPart;
-                    let cutPosition = totalLines;
-                    
-                    for (const pos of questionPositions) {
-                        if (pos <= targetLine && pos > lastCutPosition) {
-                            cutPosition = pos;
-                        } else if (pos > targetLine) {
-                            break;
-                        }
-                    }
-                    
-                    if (cutPosition === totalLines && i < numParts - 1) {
-                        cutPosition = Math.min(targetLine, totalLines);
-                    }
-                    
-                    parts.push(lines.slice(lastCutPosition, cutPosition));
-                    lastCutPosition = cutPosition;
-                }
-                
-                if (lastCutPosition < totalLines) {
-                    parts.push(lines.slice(lastCutPosition));
-                }
-            } else {
-                const linesPerPart = Math.ceil(totalLines / numParts);
-                for (let i = 0; i < numParts; i++) {
-                    const start = i * linesPerPart;
-                    const end = Math.min((i + 1) * linesPerPart, totalLines);
-                    parts.push(lines.slice(start, end));
-                }
-            }
-            
-            return parts.filter(part => part.length > 0);
-        }
-
-        function displayResults() {
-            resultsDiv.innerHTML = '<h3>📦 Archivos Generados</h3>';
-            const fileList = document.createElement('ul');
-            fileList.style.listStyle = 'none';
-            fileList.style.padding = '0';
-            
-            processedFiles.forEach((file, index) => {
-                const li = document.createElement('li');
-                li.className = 'file-item';
-                
-                const info = document.createElement('div');
-                info.innerHTML = `<strong>${file.name}</strong><br>${file.lines} líneas | ${formatFileSize(file.size)}`;
-                
-                const downloadBtn = document.createElement('button');
-                downloadBtn.className = 'download-btn';
-                downloadBtn.textContent = 'Descargar';
-                downloadBtn.onclick = () => downloadFile(file);
-                
-                li.appendChild(info);
-                li.appendChild(downloadBtn);
-                fileList.appendChild(li);
-            });
-            
-            resultsDiv.appendChild(fileList);
-            
-            const downloadAllBtn = document.createElement('button');
-            downloadAllBtn.className = 'download-all-btn';
-            downloadAllBtn.textContent = '⬇️ Descargar Todo (ZIP)';
-            downloadAllBtn.onclick = downloadAllAsZip;
-            resultsDiv.appendChild(downloadAllBtn);
-            
-            resultsDiv.classList.add('show');
-        }
-
-        function formatFileSize(bytes) {
-            if (bytes < 1024) return bytes + ' bytes';
-            else if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
-            else return Math.round(bytes / 1048576) + ' MB';
-        }
-
-        function downloadFile(file) {
-            const url = URL.createObjectURL(file.blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = file.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
-
-        async function downloadAllAsZip() {
-            if (processedFiles.length === 0) return;
-            
-            const zip = new JSZip();
-            
-            for (const file of processedFiles) {
-                const content = await file.blob.text();
-                zip.file(file.name, content);
-            }
-            
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            const baseName = selectedFile.name.replace(/\.(txt|log)$/i, '');
-            const zipName = `${baseName}_dividido.zip`;
-            
-            const url = URL.createObjectURL(zipBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = zipName;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }
+            uploadText.textContent = `📎 ${file.name}`;
+            uploadArea.classList.add('file-selected');
+            showStatus(`Archivo seleccionado: ${file.name} (${formatFileSize(file
