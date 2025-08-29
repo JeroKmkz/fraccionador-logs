@@ -437,6 +437,7 @@
                 const scratchesPorJugador = {};
                 const tiemposPorPregunta = {};
                 const aciertosEquipoPorPregunta = {};
+                const datosExtraPorPregunta = {};
                 
                 // Inicializar contadores
                 for (const jugador in this.jugadorEquipo) {
@@ -451,6 +452,8 @@
 
                 const lineas = contenidoHastaAqui.split('\n');
                 let preguntaActual = null;
+                let preguntaMasDificilHastaAhora = { pregunta: null, tiempo: 0 };
+                let mayorBrechaHastaAhora = { pregunta: null, brecha: 0 };
                 
                 for (const linea of lineas) {
                     // Detectar inicio de pregunta con timestamp
@@ -476,11 +479,13 @@
                     const matchPalo = linea.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/);
 
                     let jugador = null;
-                    if (matchScratch) {
-                        jugador = matchScratch[1];
+                    if (matchScratch || matchAce) {
+                        jugador = matchScratch ? matchScratch[1] : matchAce[1];
                         if (puntosPorJugador[jugador] !== undefined) {
                             puntosPorJugador[jugador]++;
+                            if (matchAce) acesPorJugador[jugador]++;
                             scratchesPorJugador[jugador]++;
+                            
                             if (this.jugadorEquipo[jugador]) {
                                 const equipo = this.jugadorEquipo[jugador];
                                 puntosEquipo[equipo]++;
@@ -488,32 +493,20 @@
                                     aciertosEquipoPorPregunta[preguntaActual][equipo]++;
                                 }
                             }
-                            // Capturar tiempo del primer acierto
+                            
+                            // Capturar tiempo del primer acierto y generar dato extra si es récord
                             if (preguntaActual && tiemposPorPregunta[preguntaActual] && !tiemposPorPregunta[preguntaActual].primerAcierto) {
                                 const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
                                 if (matchTimestamp) {
                                     tiemposPorPregunta[preguntaActual].primerAcierto = matchTimestamp[1];
-                                }
-                            }
-                        }
-                    } else if (matchAce) {
-                        jugador = matchAce[1];
-                        if (puntosPorJugador[jugador] !== undefined) {
-                            puntosPorJugador[jugador]++;
-                            acesPorJugador[jugador]++;
-                            scratchesPorJugador[jugador]++;
-                            if (this.jugadorEquipo[jugador]) {
-                                const equipo = this.jugadorEquipo[jugador];
-                                puntosEquipo[equipo]++;
-                                if (preguntaActual && aciertosEquipoPorPregunta[preguntaActual]) {
-                                    aciertosEquipoPorPregunta[preguntaActual][equipo]++;
-                                }
-                            }
-                            // Capturar tiempo del primer acierto
-                            if (preguntaActual && tiemposPorPregunta[preguntaActual] && !tiemposPorPregunta[preguntaActual].primerAcierto) {
-                                const matchTimestamp = linea.match(/^(\d{2}:\d{2}:\d{2})/);
-                                if (matchTimestamp) {
-                                    tiemposPorPregunta[preguntaActual].primerAcierto = matchTimestamp[1];
+                                    
+                                    // Calcular tiempo y verificar si es récord
+                                    const tiempo = this.calcularDiferenciaTiempo(tiemposPorPregunta[preguntaActual].inicio, matchTimestamp[1]);
+                                    if (tiempo > preguntaMasDificilHastaAhora.tiempo) {
+                                        preguntaMasDificilHastaAhora = { pregunta: preguntaActual, tiempo };
+                                        if (!datosExtraPorPregunta[preguntaActual]) datosExtraPorPregunta[preguntaActual] = [];
+                                        datosExtraPorPregunta[preguntaActual].push(`DATO EXTRA PARA EL CRONISTA: Pregunta con mayor dificultad de la partida hasta el momento. El bot no dio el primer acertante hasta pasados ${tiempo} segundos.`);
+                                    }
                                 }
                             }
                         }
@@ -535,6 +528,27 @@
                             palosPorJugador[jugador]++;
                         }
                     }
+
+                    // Detectar final de pregunta para calcular brecha
+                    if (linea.includes('La buena:') || linea.includes('Las buenas:')) {
+                        if (preguntaActual && aciertosEquipoPorPregunta[preguntaActual]) {
+                            const equipos = Object.keys(aciertosEquipoPorPregunta[preguntaActual]);
+                            if (equipos.length >= 2) {
+                                const valores = Object.values(aciertosEquipoPorPregunta[preguntaActual]);
+                                const max = Math.max(...valores);
+                                const min = Math.min(...valores);
+                                const brecha = max - min;
+                                
+                                if (brecha > mayorBrechaHastaAhora.brecha && max > 0) {
+                                    mayorBrechaHastaAhora = { pregunta: preguntaActual, brecha };
+                                    const equipoGanador = Object.entries(aciertosEquipoPorPregunta[preguntaActual])
+                                        .sort((a, b) => b[1] - a[1])[0][0];
+                                    if (!datosExtraPorPregunta[preguntaActual]) datosExtraPorPregunta[preguntaActual] = [];
+                                    datosExtraPorPregunta[preguntaActual].push(`DATO EXTRA PARA EL CRONISTA: Mayor brecha de la partida hasta el momento. ${equipoGanador} aventajó por +${brecha} en esta pregunta.`);
+                                }
+                            }
+                        }
+                    }
                 }
 
                 return { 
@@ -544,7 +558,8 @@
                     acesPorJugador, 
                     scratchesPorJugador,
                     tiemposPorPregunta,
-                    aciertosEquipoPorPregunta
+                    aciertosEquipoPorPregunta,
+                    datosExtraPorPregunta
                 };
             }
 
@@ -581,7 +596,37 @@
             generarResumen(contenidoHastaAqui, esPrimera, esUltima) {
                 let extras = [];
                 
-                const { puntosPorJugador, puntosEquipo, palosPorJugador, acesPorJugador, scratchesPorJugador, tiemposPorPregunta, aciertosEquipoPorPregunta } = this.contarPuntosAcumulativos(contenidoHastaAqui);
+                const { puntosPorJugador, puntosEquipo, palosPorJugador, acesPorJugador, scratchesPorJugador, tiemposPorPregunta, aciertosEquipoPorPregunta, datosExtraPorPregunta } = this.contarPuntosAcumulativos(contenidoHastaAqui);
+                
+                // Insertar datos extra en el contenido donde corresponde
+                let contenidoConExtras = contenidoHastaAqui;
+                if (Object.keys(datosExtraPorPregunta).length > 0) {
+                    const lineas = contenidoHastaAqui.split('\n');
+                    let nuevasLineas = [];
+                    
+                    lineas.forEach(linea => {
+                        nuevasLineas.push(linea);
+                        // Buscar final de pregunta para insertar datos extra
+                        if ((linea.includes('La buena:') || linea.includes('Las buenas:')) && this.botNick && linea.includes(`<${this.botNick}>`)) {
+                            // Encontrar número de pregunta anterior
+                            for (let i = nuevasLineas.length - 2; i >= 0; i--) {
+                                const matchPregunta = nuevasLineas[i].match(/Pregunta:\s*(\d+)\s*\/\s*\d+/);
+                                if (matchPregunta) {
+                                    const numPregunta = parseInt(matchPregunta[1]);
+                                    if (datosExtraPorPregunta[numPregunta]) {
+                                        datosExtraPorPregunta[numPregunta].forEach(datoExtra => {
+                                            nuevasLineas.push(datoExtra);
+                                        });
+                                        delete datosExtraPorPregunta[numPregunta]; // Evitar duplicados
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    });
+                    
+                    contenidoConExtras = nuevasLineas.join('\n');
+                }
                 
                 extras.push('\n\n═══════════════════════════════════════════');
                 extras.push('           📊 DATOS EXTRA DEL CORTE');
@@ -593,7 +638,7 @@
                     
                     for (const equipo in this.equipos) {
                         const stats = statsEquipos[equipo];
-                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.presentes}/10 jugadores en plantilla)`);
+                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.total}/10 jugadores en plantilla)`);
                     }
                     
                     extras.push('\n⚠️ AUSENCIAS POR EQUIPO:');
@@ -643,50 +688,6 @@
                     }
                 }
 
-                // Estadísticas de preguntas solo en la parte final
-                if (esUltima && Object.keys(tiemposPorPregunta).length > 0) {
-                    let preguntaMasLenta = null;
-                    let mayorTiempo = 0;
-                    
-                    for (const [pregunta, tiempos] of Object.entries(tiemposPorPregunta)) {
-                        if (tiempos.inicio && tiempos.primerAcierto) {
-                            const tiempo = this.calcularDiferenciaTiempo(tiempos.inicio, tiempos.primerAcierto);
-                            if (tiempo > mayorTiempo) {
-                                mayorTiempo = tiempo;
-                                preguntaMasLenta = { pregunta: parseInt(pregunta), tiempo };
-                            }
-                        }
-                    }
-                    
-                    let preguntaMayorBrecha = null;
-                    let mayorBrecha = 0;
-                    
-                    for (const [pregunta, aciertos] of Object.entries(aciertosEquipoPorPregunta)) {
-                        const equipos = Object.keys(aciertos);
-                        if (equipos.length >= 2) {
-                            const valores = Object.values(aciertos);
-                            const max = Math.max(...valores);
-                            const min = Math.min(...valores);
-                            const brecha = max - min;
-                            
-                            if (brecha > mayorBrecha && max > 0) {
-                                mayorBrecha = brecha;
-                                const equipoGanador = Object.entries(aciertos)
-                                    .sort((a, b) => b[1] - a[1])[0][0];
-                                preguntaMayorBrecha = { pregunta: parseInt(pregunta), brecha, equipoGanador };
-                            }
-                        }
-                    }
-                    
-                    extras.push('\n📊 ESTADÍSTICAS DE PREGUNTAS:');
-                    if (preguntaMasLenta) {
-                        extras.push(`🐌 Pregunta más lenta: P${preguntaMasLenta.pregunta} (${preguntaMasLenta.tiempo} segundos)`);
-                    }
-                    if (preguntaMayorBrecha) {
-                        extras.push(`📈 Mayor brecha: P${preguntaMayorBrecha.pregunta} (${preguntaMayorBrecha.equipoGanador} +${preguntaMayorBrecha.brecha})`);
-                    }
-                }
-
                 if (esUltima) {
                     extras.push('\n🥇 CLASIFICACIÓN INDIVIDUAL FINAL:');
                     const jugadoresOrdenados = Object.entries(puntosPorJugador)
@@ -696,6 +697,55 @@
                     jugadoresOrdenados.forEach(([j, p]) => {
                         const palos = palosPorJugador[j] || 0;
                         const aces = acesPorJugador[j] || 0;
+                        const scratches = scratchesPorJugador[j] || 0;
+                        
+                        let detalles = [`${p} puntos`];
+                        if (scratches > 0) detalles.push(`${scratches} scratches`);
+                        if (aces > 0) detalles.push(`${aces} aces`);
+                        if (palos > 0) detalles.push(`${palos} palos`);
+                        
+                        extras.push(`${j}: ${detalles.join(', ')}`);
+                    });
+
+                    extras.push('\n🏆 CLASIFICACIÓN POR EQUIPOS FINAL:');
+                    const equiposStats = {};
+                    
+                    for (const equipo in this.equipos) {
+                        equiposStats[equipo] = {
+                            puntos: puntosEquipo[equipo] || 0,
+                            scratches: 0,
+                            aces: 0,
+                            palos: 0
+                        };
+                    }
+                    
+                    for (const jugador in this.jugadorEquipo) {
+                        const equipo = this.jugadorEquipo[jugador];
+                        if (equiposStats[equipo]) {
+                            equiposStats[equipo].scratches += scratchesPorJugador[jugador] || 0;
+                            equiposStats[equipo].aces += acesPorJugador[jugador] || 0;
+                            equiposStats[equipo].palos += palosPorJugador[jugador] || 0;
+                        }
+                    }
+                    
+                    const equiposOrdenados = Object.entries(equiposStats)
+                        .sort((a, b) => b[1].puntos - a[1].puntos);
+                    
+                    equiposOrdenados.forEach(([equipo, stats]) => {
+                        let detalles = [`${stats.puntos} puntos`];
+                        if (stats.scratches > 0) detalles.push(`${stats.scratches} scratches`);
+                        if (stats.aces > 0) detalles.push(`${stats.aces} aces`);
+                        if (stats.palos > 0) detalles.push(`${stats.palos} palos`);
+                        
+                        extras.push(`${equipo}: ${detalles.join(', ')}`);
+                    });
+                }
+
+                extras.push('\n═══════════════════════════════════════════\n');
+                
+                // Retornar contenido con datos extra insertados + resumen al final
+                return contenidoConExtras + extras.join('\n');
+            }ugador[j] || 0;
                         const scratches = scratchesPorJugador[j] || 0;
                         
                         let detalles = [`${p} puntos`];
@@ -883,9 +933,9 @@
                             contenidoAcumulado += parte.contenido;
                             const esPrimera = idx === 0;
                             const esUltima = idx === partes.length - 1;
-                            const extras = analizador.generarResumen(contenidoAcumulado, esPrimera, esUltima);
+                            const contenidoConExtras = analizador.generarResumen(contenidoAcumulado, esPrimera, esUltima);
                             
-                            parte.contenido += extras;
+                            parte.contenido = contenidoConExtras;
                         });
                     }
 
