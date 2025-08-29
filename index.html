@@ -526,10 +526,11 @@
                 if (esPrimera) {
                     extras.push('🏆 EQUIPOS PARTICIPANTES:');
                     const statsEquipos = this.obtenerEstadisticasEquipos();
+                    const totalJugadores = Object.values(statsEquipos).reduce((sum, stats) => sum + stats.total, 0);
                     
                     for (const equipo in this.equipos) {
                         const stats = statsEquipos[equipo];
-                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.total} jugadores en plantilla)`);
+                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.presentes}/${stats.total} jugadores en plantilla)`);
                     }
                     
                     extras.push('\n⚠️ AUSENCIAS POR EQUIPO:');
@@ -577,6 +578,43 @@
                         if (palos > 0) detalles.push(`${palos} palos`);
                         
                         extras.push(`${j}: ${detalles.join(', ')}`);
+                    });
+
+                    // Añadir clasificación por equipos
+                    extras.push('\n🏆 CLASIFICACIÓN POR EQUIPOS FINAL:');
+                    const equiposStats = {};
+                    
+                    // Calcular estadísticas por equipo
+                    for (const equipo in this.equipos) {
+                        equiposStats[equipo] = {
+                            puntos: puntosEquipo[equipo] || 0,
+                            scratches: 0,
+                            aces: 0,
+                            palos: 0
+                        };
+                    }
+                    
+                    // Sumar estadísticas de jugadores por equipo
+                    for (const jugador in this.jugadorEquipo) {
+                        const equipo = this.jugadorEquipo[jugador];
+                        if (equiposStats[equipo]) {
+                            equiposStats[equipo].scratches += scratchesPorJugador[jugador] || 0;
+                            equiposStats[equipo].aces += acesPorJugador[jugador] || 0;
+                            equiposStats[equipo].palos += palosPorJugador[jugador] || 0;
+                        }
+                    }
+                    
+                    // Mostrar estadísticas por equipo ordenadas por puntos
+                    const equiposOrdenados = Object.entries(equiposStats)
+                        .sort((a, b) => b[1].puntos - a[1].puntos);
+                    
+                    equiposOrdenados.forEach(([equipo, stats]) => {
+                        let detalles = [`${stats.puntos} puntos`];
+                        if (stats.scratches > 0) detalles.push(`${stats.scratches} scratches`);
+                        if (stats.aces > 0) detalles.push(`${stats.aces} aces`);
+                        if (stats.palos > 0) detalles.push(`${stats.palos} palos`);
+                        
+                        extras.push(`${equipo}: ${detalles.join(', ')}`);
                     });
                 }
 
