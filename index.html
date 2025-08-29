@@ -391,29 +391,29 @@
                 
                 const lineas = this.contenidoCompleto.split('\n');
                 for (const linea of lineas) {
-                    // Buscar mensajes de cualquier jugador (varios formatos posibles)
-                    // Formato básico: <nick> mensaje
-                    // También buscar sin < > por si están limpios
-                    const matchJugador1 = linea.match(/<([^>]+)>/);
-                    const matchJugador2 = linea.match(/^\d{2}:\d{2}:\d{2}\s+<([^>]+)>/);
-                    const matchJugador3 = linea.match(/\s([A-Za-z0-9\[\]^_\-@]+)\s/);
-                    
-                    let posiblesNicks = [];
-                    if (matchJugador1) posiblesNicks.push(matchJugador1[1]);
-                    if (matchJugador2) posiblesNicks.push(matchJugador2[1]);
-                    
-                    // También buscar directamente los nicks conocidos en la línea
-                    for (const jugador in this.jugadorEquipo) {
-                        if (linea.includes(jugador) && jugador !== this.botNick) {
-                            posiblesNicks.push(jugador);
+                    // SOLO buscar el formato <nick> que indica un mensaje del jugador
+                    const matchJugador = linea.match(/<([^>]+)>/);
+                    if (matchJugador) {
+                        const nick = matchJugador[1];
+                        
+                        // Excluir líneas que son del bot o del sistema
+                        if (nick === this.botNick || 
+                            linea.includes('--- Equipos participantes ---') || 
+                            linea.includes('>>>') || 
+                            linea.includes('--- DATOS RESETEADOS ---') ||
+                            linea.includes('Base Datos Preguntas:') ||
+                            linea.includes('Pregunta:')) {
+                            continue;
                         }
-                    }
-                    
-                    // Verificar si alguno de los nicks encontrados está en nuestros equipos
-                    for (const nick of posiblesNicks) {
-                        if (this.jugadorEquipo[nick] && nick !== this.botNick) {
-                            this.jugadoresActivos.add(nick);
-                            console.log('Jugador activo encontrado:', nick);
+                        
+                        // Verificar si este nick corresponde a algún jugador registrado
+                        // Comparar tanto el nick exacto como variaciones (mayúsculas/minúsculas)
+                        for (const jugadorRegistrado in this.jugadorEquipo) {
+                            if (nick.toLowerCase() === jugadorRegistrado.toLowerCase()) {
+                                this.jugadoresActivos.add(jugadorRegistrado);
+                                console.log('Jugador activo encontrado:', jugadorRegistrado, 'en línea:', linea.substring(0, 150));
+                                break;
+                            }
                         }
                     }
                 }
