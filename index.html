@@ -325,9 +325,11 @@
                 this.jugadorEquipo = {};
                 this.botNick = null;
                 this.jugadoresActivos = new Set();
+                this.contenidoCompleto = '';
             }
 
             identificarBot(contenido) {
+                this.contenidoCompleto = contenido;
                 const lineas = contenido.split('\n');
                 for (const linea of lineas) {
                     if (linea.includes('--- Equipos participantes ---')) {
@@ -378,22 +380,27 @@
                         }
                     }
                 }
+
+                // Una vez procesados los equipos, detectar ausencias en todo el log
+                this.detectarJugadoresActivosEnTodoElLog();
             }
 
-            detectarJugadoresActivos(contenido) {
-                const lineas = contenido.split('\n');
+            detectarJugadoresActivosEnTodoElLog() {
+                const lineas = this.contenidoCompleto.split('\n');
                 for (const linea of lineas) {
-                    const matchJugador = linea.match(/<([^>]+)>\s+(.+)/);
-                    if (matchJugador && matchJugador[1] !== this.botNick) {
+                    // Buscar mensajes de cualquier jugador (formato <nick> mensaje)
+                    const matchJugador = linea.match(/<([^>]+)>\s+/);
+                    if (matchJugador) {
                         const nick = matchJugador[1];
-                        if (this.jugadorEquipo[nick]) {
+                        // Solo contar si está en algún equipo y no es el bot
+                        if (this.jugadorEquipo[nick] && nick !== this.botNick) {
                             this.jugadoresActivos.add(nick);
                         }
                     }
                 }
             }
 
-            contarPuntos(contenido) {
+            contarPuntosAcumulativos(contenidoHastaAqui) {
                 const puntosPorJugador = {};
                 const puntosEquipo = {};
                 
@@ -405,7 +412,7 @@
                     puntosEquipo[equipo] = 0;
                 }
 
-                const lineas = contenido.split('\n');
+                const lineas = contenidoHastaAqui.split('\n');
                 for (const linea of lineas) {
                     if (!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
 
@@ -442,14 +449,11 @@
                 return ausentes;
             }
 
-            generarResumen(contenido, esPrimera, esUltima) {
+            generarResumen(contenidoHastaAqui, esPrimera, esUltima) {
                 let extras = [];
                 
-                // Detectar jugadores activos en todo el contenido
-                this.detectarJugadoresActivos(contenido);
-                
-                // Contar puntos solo en este contenido
-                const { puntosPorJugador, puntosEquipo } = this.contarPuntos(contenido);
+                // Contar puntos acumulativos hasta esta parte
+                const { puntosPorJugador, puntosEquipo } = this.contarPuntosAcumulativos(contenidoHastaAqui);
                 
                 extras.push('\n\n═══════════════════════════════════════════');
                 extras.push('           📊 DATOS EXTRA DEL CORTE');
@@ -625,10 +629,12 @@
 
                     // Añadir extras si están activados
                     if (addExtras && analizador) {
+                        let contenidoAcumulado = '';
                         partes.forEach((parte, idx) => {
+                            contenidoAcumulado += parte.contenido;
                             const esPrimera = idx === 0;
                             const esUltima = idx === partes.length - 1;
-                            const extras = analizador.generarResumen(parte.contenido, esPrimera, esUltima);
+                            const extras = analizador.generarResumen(contenidoAcumulado, esPrimera, esUltima);
                             
                             parte.contenido += extras;
                         });
