@@ -634,6 +634,123 @@
                     }
                 }
 
+            generarResumen(contenidoHastaAqui, esPrimera, esUltima) {
+                let extras = [];
+                
+                // Contar puntos acumulativos hasta esta parte
+                const { puntosPorJugador, puntosEquipo, palosPorJugador, acesPorJugador, scratchesPorJugador, tiemposPorPregunta, aciertosEquipoPorPregunta } = this.contarPuntosAcumulativos(contenidoHastaAqui);
+                
+                extras.push('\n\n═══════════════════════════════════════════');
+                extras.push('           📊 DATOS EXTRA DEL CORTE');
+                extras.push('═══════════════════════════════════════════\n');
+
+                if (esPrimera) {
+                    extras.push('🏆 EQUIPOS PARTICIPANTES:');
+                    const statsEquipos = this.obtenerEstadisticasEquipos();
+                    
+                    for (const equipo in this.equipos) {
+                        const stats = statsEquipos[equipo];
+                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.presentes}/10 jugadores en plantilla)`);
+                    }
+                    
+                    extras.push('\n⚠️ AUSENCIAS POR EQUIPO:');
+                    let hayAusencias = false;
+                    for (const equipo in statsEquipos) {
+                        const stats = statsEquipos[equipo];
+                        if (stats.ausentes > 0) {
+                            extras.push(`${equipo}: ${stats.listaAusentes.join(', ')} (${stats.ausentes} ausencias)`);
+                            hayAusencias = true;
+                        }
+                    }
+                    if (!hayAusencias) {
+                        extras.push('No hay ausencias - todos los jugadores participan');
+                    }
+                    
+                    extras.push('\n📋 JUGADORES DISPONIBLES:');
+                    const equiposDisponibles = [];
+                    for (const equipo in statsEquipos) {
+                        const stats = statsEquipos[equipo];
+                        equiposDisponibles.push(`${stats.presentes} ${equipo}`);
+                    }
+                    extras.push(equiposDisponibles.join(' vs '));
+                    extras.push('');
+                }
+
+                // Marcador (final si es la última parte, en el corte si no)
+                const tituloMarcador = esUltima ? '🏁 MARCADOR FINAL:' : '📈 MARCADOR EN EL CORTE:';
+                extras.push(tituloMarcador);
+                for (const equipo in puntosEquipo) {
+                    extras.push(`${equipo}: ${puntosEquipo[equipo]} puntos`);
+                }
+
+                // Lucha por el MVP (solo en partes intermedias, no en la final)
+                if (!esUltima) {
+                    extras.push('\n⭐ LUCHA POR EL MVP:');
+                    const topJugadores = Object.entries(puntosPorJugador)
+                        .filter(([j, p]) => p > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 4); // Top 4
+                    
+                    if (topJugadores.length > 0) {
+                        topJugadores.forEach(([j, p], index) => {
+                            const posicion = index + 1;
+                            const emoji = posicion === 1 ? '🥇' : posicion === 2 ? '🥈' : posicion === 3 ? '🥉' : '🏅';
+                            extras.push(`${emoji} ${j}: ${p} puntos`);
+                        });
+                    } else {
+                        extras.push('Aún no hay puntuaciones registradas');
+                    }
+                }
+
+                // Estadísticas de preguntas (solo en la parte final)
+                if (esUltima && Object.keys(tiemposPorPregunta).length > 0) {
+                    // Pregunta más lenta
+                    let preguntaMasLenta = null;
+                    let mayorTiempo = 0;
+                    
+                    for (const [pregunta, tiempos] of Object.entries(tiemposPorPregunta)) {
+                        if (tiempos.inicio && tiempos.primerAcierto) {
+                            const tiempo = this.calcularDiferenciaTiempo(tiempos.inicio, tiempos.primerAcierto);
+                            if (tiempo > mayorTiempo) {
+                                mayorTiempo = tiempo;
+                                preguntaMasLenta = { pregunta: parseInt(pregunta), tiempo };
+                            }
+                        }
+                    }
+                    
+                    // Pregunta con mayor brecha
+                    let preguntaMayorBrecha = null;
+                    let mayorBrecha = 0;
+                    
+                    for (const [pregunta, aciertos] of Object.entries(aciertosEquipoPorPregunta)) {
+                        const equipos = Object.keys(aciertos);
+                        if (equipos.length >= 2) {
+                            const valores = Object.values(aciertos);
+                            const max = Math.max(...valores);
+                            const min = Math.min(...valores);
+                            const brecha = max - min;
+                            
+                            if (brecha > mayorBrecha && max > 0) {
+                                mayorBrecha = brecha;
+                                const equipoGanador = Object.entries(aciertos)
+                                    .sort((a, b) => b[1] - a[1])[0][0];
+                                preguntaMayorBrecha = { pregunta: parseInt(pregunta), brecha, equipoGanador };
+                            }
+                        }
+                    }
+                    
+                    extras.push('\n📊 ESTADÍSTICAS DE PREGUNTAS:');
+                    if (preguntaMasLenta) {
+                        extras.push(`🐌 Pregunta más lenta: P${preguntaMasLenta.pregunta} (${preguntaMasLenta.tiempo} segundos)`);
+                    }
+                    if (preguntaMayorBrecha) {
+                        extras.push(`📈 Mayor brecha: P${preguntaMayorBrecha.pregunta} (${preguntaMayorBrecha.equipoGanador} +${preguntaMayorBrecha.brecha})`);
+                    }
+                    if (!preguntaMasLenta && !preguntaMayorBrecha) {
+                        extras.push('No hay suficientes datos de preguntas');
+                    }
+                }
+
                 if (esUltima) {
                     extras.push('\n🥇 CLASIFICACIÓN INDIVIDUAL FINAL:');
                     const jugadoresOrdenados = Object.entries(puntosPorJugador)
@@ -653,7 +770,7 @@
                         extras.push(`${j}: ${detalles.join(', ')}`);
                     });
 
-                    // Añadir clasificación por equipos
+                    // Clasificación por equipos final
                     extras.push('\n🏆 CLASIFICACIÓN POR EQUIPOS FINAL:');
                     const equiposStats = {};
                     
@@ -693,6 +810,19 @@
 
                 extras.push('\n═══════════════════════════════════════════\n');
                 return extras.join('\n');
+            }
+
+            calcularDiferenciaTiempo(inicio, fin) {
+                const [h1, m1, s1] = inicio.split(':').map(Number);
+                const [h2, m2, s2] = fin.split(':').map(Number);
+                
+                const segundos1 = h1 * 3600 + m1 * 60 + s1;
+                const segundos2 = h2 * 3600 + m2 * 60 + s2;
+                
+                let diferencia = segundos2 - segundos1;
+                if (diferencia < 0) diferencia += 86400; // Por si hay cambio de día
+                
+                return diferencia;
             }
         }
 
