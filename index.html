@@ -386,18 +386,40 @@
             }
 
             detectarJugadoresActivosEnTodoElLog() {
+                console.log('Detectando jugadores activos en todo el log...');
+                console.log('Jugadores registrados:', Object.keys(this.jugadorEquipo));
+                
                 const lineas = this.contenidoCompleto.split('\n');
                 for (const linea of lineas) {
-                    // Buscar mensajes de cualquier jugador (formato <nick> mensaje)
-                    const matchJugador = linea.match(/<([^>]+)>\s+/);
-                    if (matchJugador) {
-                        const nick = matchJugador[1];
-                        // Solo contar si está en algún equipo y no es el bot
+                    // Buscar mensajes de cualquier jugador (varios formatos posibles)
+                    // Formato básico: <nick> mensaje
+                    // También buscar sin < > por si están limpios
+                    const matchJugador1 = linea.match(/<([^>]+)>/);
+                    const matchJugador2 = linea.match(/^\d{2}:\d{2}:\d{2}\s+<([^>]+)>/);
+                    const matchJugador3 = linea.match(/\s([A-Za-z0-9\[\]^_\-@]+)\s/);
+                    
+                    let posiblesNicks = [];
+                    if (matchJugador1) posiblesNicks.push(matchJugador1[1]);
+                    if (matchJugador2) posiblesNicks.push(matchJugador2[1]);
+                    
+                    // También buscar directamente los nicks conocidos en la línea
+                    for (const jugador in this.jugadorEquipo) {
+                        if (linea.includes(jugador) && jugador !== this.botNick) {
+                            posiblesNicks.push(jugador);
+                        }
+                    }
+                    
+                    // Verificar si alguno de los nicks encontrados está en nuestros equipos
+                    for (const nick of posiblesNicks) {
                         if (this.jugadorEquipo[nick] && nick !== this.botNick) {
                             this.jugadoresActivos.add(nick);
+                            console.log('Jugador activo encontrado:', nick);
                         }
                     }
                 }
+                
+                console.log('Jugadores activos detectados:', Array.from(this.jugadoresActivos));
+                console.log('Total jugadores activos:', this.jugadoresActivos.size);
             }
 
             contarPuntosAcumulativos(contenidoHastaAqui) {
