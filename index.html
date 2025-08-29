@@ -556,9 +556,28 @@
                     extras.push('');
                 }
 
-                extras.push('📈 MARCADOR EN EL CORTE:');
+                // Marcador (final si es la última parte, en el corte si no)
+                const tituloMarcador = esUltima ? '🏁 MARCADOR FINAL:' : '📈 MARCADOR EN EL CORTE:';
+                extras.push(tituloMarcador);
                 for (const equipo in puntosEquipo) {
                     extras.push(`${equipo}: ${puntosEquipo[equipo]} puntos`);
+                }
+
+                // Lucha por el MVP en todas las partes
+                extras.push('\n⭐ LUCHA POR EL MVP:');
+                const topJugadores = Object.entries(puntosPorJugador)
+                    .filter(([j, p]) => p > 0)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 4); // Top 4
+                
+                if (topJugadores.length > 0) {
+                    topJugadores.forEach(([j, p], index) => {
+                        const posicion = index + 1;
+                        const emoji = posicion === 1 ? '🥇' : posicion === 2 ? '🥈' : posicion === 3 ? '🥉' : '🏅';
+                        extras.push(`${emoji} ${j}: ${p} puntos`);
+                    });
+                } else {
+                    extras.push('Aún no hay puntuaciones registradas');
                 }
 
                 if (esUltima) {
