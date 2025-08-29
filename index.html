@@ -323,9 +323,8 @@
             constructor() {
                 this.equipos = {};
                 this.jugadorEquipo = {};
-                this.puntosPorJugador = {};
-                this.puntosEquipo = {};
                 this.botNick = null;
+                this.jugadoresActivos = new Set();
             }
 
             identificarBot(contenido) {
@@ -364,7 +363,6 @@
                                 if (linea.includes(eq)) {
                                     equipoActual = eq;
                                     this.equipos[equipoActual] = [];
-                                    this.puntosEquipo[equipoActual] = 0;
                                     break;
                                 }
                             }
@@ -375,7 +373,6 @@
                                 this.equipos[equipoActual] = jugadores;
                                 jugadores.forEach(j => {
                                     this.jugadorEquipo[j] = equipoActual;
-                                    this.puntosPorJugador[j] = 0;
                                 });
                             }
                         }
@@ -383,7 +380,31 @@
                 }
             }
 
-            procesarHasta(contenido) {
+            detectarJugadoresActivos(contenido) {
+                const lineas = contenido.split('\n');
+                for (const linea of lineas) {
+                    const matchJugador = linea.match(/<([^>]+)>\s+(.+)/);
+                    if (matchJugador && matchJugador[1] !== this.botNick) {
+                        const nick = matchJugador[1];
+                        if (this.jugadorEquipo[nick]) {
+                            this.jugadoresActivos.add(nick);
+                        }
+                    }
+                }
+            }
+
+            contarPuntos(contenido) {
+                const puntosPorJugador = {};
+                const puntosEquipo = {};
+                
+                // Inicializar contadores
+                for (const jugador in this.jugadorEquipo) {
+                    puntosPorJugador[jugador] = 0;
+                }
+                for (const equipo in this.equipos) {
+                    puntosEquipo[equipo] = 0;
+                }
+
                 const lineas = contenido.split('\n');
                 for (const linea of lineas) {
                     if (!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
@@ -398,17 +419,37 @@
                     else if (matchAce) jugador = matchAce[1];
                     else if (matchAcierto) jugador = matchAcierto[1];
 
-                    if (jugador && this.puntosPorJugador[jugador] !== undefined) {
-                        this.puntosPorJugador[jugador]++;
+                    if (jugador && puntosPorJugador[jugador] !== undefined) {
+                        puntosPorJugador[jugador]++;
                         if (this.jugadorEquipo[jugador]) {
-                            this.puntosEquipo[this.jugadorEquipo[jugador]]++;
+                            puntosEquipo[this.jugadorEquipo[jugador]]++;
                         }
                     }
                 }
+
+                return { puntosPorJugador, puntosEquipo };
             }
 
-            generarResumen(esPrimera, esUltima) {
+            obtenerAusencias() {
+                const ausentes = [];
+                for (const equipo in this.equipos) {
+                    for (const jugador of this.equipos[equipo]) {
+                        if (!this.jugadoresActivos.has(jugador)) {
+                            ausentes.push({ jugador, equipo });
+                        }
+                    }
+                }
+                return ausentes;
+            }
+
+            generarResumen(contenido, esPrimera, esUltima) {
                 let extras = [];
+                
+                // Detectar jugadores activos en todo el contenido
+                this.detectarJugadoresActivos(contenido);
+                
+                // Contar puntos solo en este contenido
+                const { puntosPorJugador, puntosEquipo } = this.contarPuntos(contenido);
                 
                 extras.push('\n\n═══════════════════════════════════════════');
                 extras.push('           📊 DATOS EXTRA DEL CORTE');
@@ -419,17 +460,25 @@
                     for (const equipo in this.equipos) {
                         extras.push(`${equipo}: ${this.equipos[equipo].join(', ')}`);
                     }
+                    
+                    const ausencias = this.obtenerAusencias();
+                    if (ausencias.length > 0) {
+                        extras.push('\n⚠️ JUGADORES AUSENTES:');
+                        ausencias.forEach(a => {
+                            extras.push(`${a.jugador} (${a.equipo})`);
+                        });
+                    }
                     extras.push('');
                 }
 
-                extras.push('📈 MARCADOR ACTUAL:');
-                for (const equipo in this.puntosEquipo) {
-                    extras.push(`${equipo}: ${this.puntosEquipo[equipo]} puntos`);
+                extras.push('📈 MARCADOR EN EL CORTE:');
+                for (const equipo in puntosEquipo) {
+                    extras.push(`${equipo}: ${puntosEquipo[equipo]} puntos`);
                 }
 
                 if (esUltima) {
-                    extras.push('\n🥇 PUNTUACIÓN INDIVIDUAL:');
-                    const jugadoresOrdenados = Object.entries(this.puntosPorJugador)
+                    extras.push('\n🥇 PUNTUACIÓN INDIVIDUAL FINAL:');
+                    const jugadoresOrdenados = Object.entries(puntosPorJugador)
                         .filter(([j, p]) => p > 0)
                         .sort((a, b) => b[1] - a[1]);
                     
@@ -576,14 +625,10 @@
 
                     // Añadir extras si están activados
                     if (addExtras && analizador) {
-                        let contenidoAcumulado = '';
                         partes.forEach((parte, idx) => {
-                            contenidoAcumulado += parte.contenido;
-                            analizador.procesarHasta(contenidoAcumulado);
-                            
                             const esPrimera = idx === 0;
                             const esUltima = idx === partes.length - 1;
-                            const extras = analizador.generarResumen(esPrimera, esUltima);
+                            const extras = analizador.generarResumen(parte.contenido, esPrimera, esUltima);
                             
                             parte.contenido += extras;
                         });
