@@ -389,14 +389,21 @@
                 console.log('Detectando jugadores activos en todo el log...');
                 console.log('Jugadores registrados:', Object.keys(this.jugadorEquipo));
                 
+                const totalJugadores = Object.keys(this.jugadorEquipo).length;
                 const lineas = this.contenidoCompleto.split('\n');
+                
                 for (const linea of lineas) {
-                    // SOLO buscar el formato <nick> que indica un mensaje del jugador
+                    // Optimización: si ya encontramos a todos, salir
+                    if (this.jugadoresActivos.size === totalJugadores) {
+                        console.log('Todos los jugadores encontrados, deteniendo búsqueda');
+                        break;
+                    }
+                    
                     const matchJugador = linea.match(/<([^>]+)>/);
                     if (matchJugador) {
                         const nick = matchJugador[1];
                         
-                        // Excluir líneas que son del bot o del sistema
+                        // Excluir líneas del bot o del sistema
                         if (nick === this.botNick || 
                             linea.includes('--- Equipos participantes ---') || 
                             linea.includes('>>>') || 
@@ -407,11 +414,11 @@
                         }
                         
                         // Verificar si este nick corresponde a algún jugador registrado
-                        // Comparar tanto el nick exacto como variaciones (mayúsculas/minúsculas)
                         for (const jugadorRegistrado in this.jugadorEquipo) {
-                            if (nick.toLowerCase() === jugadorRegistrado.toLowerCase()) {
+                            if (nick.toLowerCase() === jugadorRegistrado.toLowerCase() && 
+                                !this.jugadoresActivos.has(jugadorRegistrado)) {
                                 this.jugadoresActivos.add(jugadorRegistrado);
-                                console.log('Jugador activo encontrado:', jugadorRegistrado, 'en línea:', linea.substring(0, 150));
+                                console.log('Jugador activo encontrado:', jugadorRegistrado);
                                 break;
                             }
                         }
@@ -425,10 +432,16 @@
             contarPuntosAcumulativos(contenidoHastaAqui) {
                 const puntosPorJugador = {};
                 const puntosEquipo = {};
+                const palosPorJugador = {};
+                const acesPorJugador = {};
+                const scratchesPorJugador = {};
                 
                 // Inicializar contadores
                 for (const jugador in this.jugadorEquipo) {
                     puntosPorJugador[jugador] = 0;
+                    palosPorJugador[jugador] = 0;
+                    acesPorJugador[jugador] = 0;
+                    scratchesPorJugador[jugador] = 0;
                 }
                 for (const equipo in this.equipos) {
                     puntosEquipo[equipo] = 0;
@@ -442,40 +455,69 @@
                     const matchScratch = linea.match(/>>>(\S+)\s+scratchea/);
                     const matchAce = linea.match(/>>>(\S+)\s+acea/);
                     const matchAcierto = linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/);
+                    const matchPalo = linea.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/);
 
                     let jugador = null;
-                    if (matchScratch) jugador = matchScratch[1];
-                    else if (matchAce) jugador = matchAce[1];
-                    else if (matchAcierto) jugador = matchAcierto[1];
-
-                    if (jugador && puntosPorJugador[jugador] !== undefined) {
-                        puntosPorJugador[jugador]++;
-                        if (this.jugadorEquipo[jugador]) {
-                            puntosEquipo[this.jugadorEquipo[jugador]]++;
+                    if (matchScratch) {
+                        jugador = matchScratch[1];
+                        if (puntosPorJugador[jugador] !== undefined) {
+                            puntosPorJugador[jugador]++;
+                            scratchesPorJugador[jugador]++;
+                            if (this.jugadorEquipo[jugador]) {
+                                puntosEquipo[this.jugadorEquipo[jugador]]++;
+                            }
+                        }
+                    } else if (matchAce) {
+                        jugador = matchAce[1];
+                        if (puntosPorJugador[jugador] !== undefined) {
+                            puntosPorJugador[jugador]++;
+                            acesPorJugador[jugador]++;
+                            scratchesPorJugador[jugador]++; // Los aces también son scratches
+                            if (this.jugadorEquipo[jugador]) {
+                                puntosEquipo[this.jugadorEquipo[jugador]]++;
+                            }
+                        }
+                    } else if (matchAcierto) {
+                        jugador = matchAcierto[1];
+                        if (puntosPorJugador[jugador] !== undefined) {
+                            puntosPorJugador[jugador]++;
+                            if (this.jugadorEquipo[jugador]) {
+                                puntosEquipo[this.jugadorEquipo[jugador]]++;
+                            }
+                        }
+                    } else if (matchPalo) {
+                        jugador = matchPalo[1];
+                        if (palosPorJugador[jugador] !== undefined) {
+                            palosPorJugador[jugador]++;
                         }
                     }
                 }
 
-                return { puntosPorJugador, puntosEquipo };
+                return { puntosPorJugador, puntosEquipo, palosPorJugador, acesPorJugador, scratchesPorJugador };
             }
 
-            obtenerAusencias() {
-                const ausentes = [];
+            obtenerEstadisticasEquipos() {
+                const statsEquipos = {};
                 for (const equipo in this.equipos) {
-                    for (const jugador of this.equipos[equipo]) {
-                        if (!this.jugadoresActivos.has(jugador)) {
-                            ausentes.push({ jugador, equipo });
-                        }
-                    }
+                    const jugadoresEquipo = this.equipos[equipo];
+                    const ausentes = jugadoresEquipo.filter(j => !this.jugadoresActivos.has(j));
+                    const presentes = jugadoresEquipo.filter(j => this.jugadoresActivos.has(j));
+                    
+                    statsEquipos[equipo] = {
+                        total: jugadoresEquipo.length,
+                        presentes: presentes.length,
+                        ausentes: ausentes.length,
+                        listaAusentes: ausentes
+                    };
                 }
-                return ausentes;
+                return statsEquipos;
             }
 
             generarResumen(contenidoHastaAqui, esPrimera, esUltima) {
                 let extras = [];
                 
                 // Contar puntos acumulativos hasta esta parte
-                const { puntosPorJugador, puntosEquipo } = this.contarPuntosAcumulativos(contenidoHastaAqui);
+                const { puntosPorJugador, puntosEquipo, palosPorJugador, acesPorJugador, scratchesPorJugador } = this.contarPuntosAcumulativos(contenidoHastaAqui);
                 
                 extras.push('\n\n═══════════════════════════════════════════');
                 extras.push('           📊 DATOS EXTRA DEL CORTE');
@@ -483,17 +525,33 @@
 
                 if (esPrimera) {
                     extras.push('🏆 EQUIPOS PARTICIPANTES:');
+                    const statsEquipos = this.obtenerEstadisticasEquipos();
+                    
                     for (const equipo in this.equipos) {
-                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')}`);
+                        const stats = statsEquipos[equipo];
+                        extras.push(`${equipo}: ${this.equipos[equipo].join(', ')} (${stats.total} jugadores en plantilla)`);
                     }
                     
-                    const ausencias = this.obtenerAusencias();
-                    if (ausencias.length > 0) {
-                        extras.push('\n⚠️ JUGADORES AUSENTES:');
-                        ausencias.forEach(a => {
-                            extras.push(`${a.jugador} (${a.equipo})`);
-                        });
+                    extras.push('\n⚠️ AUSENCIAS POR EQUIPO:');
+                    let hayAusencias = false;
+                    for (const equipo in statsEquipos) {
+                        const stats = statsEquipos[equipo];
+                        if (stats.ausentes > 0) {
+                            extras.push(`${equipo}: ${stats.listaAusentes.join(', ')} (${stats.ausentes} ausencias)`);
+                            hayAusencias = true;
+                        }
                     }
+                    if (!hayAusencias) {
+                        extras.push('No hay ausencias - todos los jugadores participan');
+                    }
+                    
+                    extras.push('\n📋 JUGADORES DISPONIBLES:');
+                    const equiposDisponibles = [];
+                    for (const equipo in statsEquipos) {
+                        const stats = statsEquipos[equipo];
+                        equiposDisponibles.push(`${stats.presentes} ${equipo}`);
+                    }
+                    extras.push(equiposDisponibles.join(' vs '));
                     extras.push('');
                 }
 
@@ -503,13 +561,22 @@
                 }
 
                 if (esUltima) {
-                    extras.push('\n🥇 PUNTUACIÓN INDIVIDUAL FINAL:');
+                    extras.push('\n🥇 CLASIFICACIÓN INDIVIDUAL FINAL:');
                     const jugadoresOrdenados = Object.entries(puntosPorJugador)
                         .filter(([j, p]) => p > 0)
                         .sort((a, b) => b[1] - a[1]);
                     
                     jugadoresOrdenados.forEach(([j, p]) => {
-                        extras.push(`${j}: ${p} puntos`);
+                        const palos = palosPorJugador[j] || 0;
+                        const aces = acesPorJugador[j] || 0;
+                        const scratches = scratchesPorJugador[j] || 0;
+                        
+                        let detalles = [`${p} puntos`];
+                        if (scratches > 0) detalles.push(`${scratches} scratches`);
+                        if (aces > 0) detalles.push(`${aces} aces`);
+                        if (palos > 0) detalles.push(`${palos} palos`);
+                        
+                        extras.push(`${j}: ${detalles.join(', ')}`);
                     });
                 }
 
