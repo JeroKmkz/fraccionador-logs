@@ -236,7 +236,6 @@
           }
         }
 
-        // Resultado global
         this.recordsGlobales={
           dificultad:maxDificultad.tiempo>=0 ? maxDificultad : null,
           brecha:maxBrecha.brecha>=0 ? maxBrecha : null,
@@ -246,7 +245,6 @@
 
       // -------- 2ª pasada: inserción SOLO en las preguntas que ganaron el récord global --------
       anotarDatosEnLinea(contenido){
-        // Asegurar preanálisis listo
         if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
 
         const lineas=contenido.split('\n');
@@ -261,11 +259,9 @@
 
           nuevas.push(linea);
 
-          // Inserción al cerrar la pregunta (donde aparece "La buena/Las buenas")
           if(this.botNick && linea.includes(`<${this.botNick}>`) && currentQ!=null &&
              (/La buena:/i.test(linea) || /Las buenas:/i.test(linea))){
 
-            // DIFICULTAD global
             if(this.recordsGlobales.dificultad && !inserted.dificultad &&
                this.recordsGlobales.dificultad.q === currentQ){
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
@@ -273,7 +269,6 @@
               inserted.dificultad=true;
             }
 
-            // BRECHA global
             if(this.recordsGlobales.brecha && !inserted.brecha &&
                this.recordsGlobales.brecha.q === currentQ){
               const {brecha,ganador}=this.recordsGlobales.brecha;
@@ -282,7 +277,6 @@
               inserted.brecha=true;
             }
 
-            // RACHA cortada global
             if(this.recordsGlobales.racha && !inserted.racha &&
                this.recordsGlobales.racha.qCorte === currentQ){
               const {len,jugador}=this.recordsGlobales.racha;
@@ -360,7 +354,7 @@
 
       generarResumen(contenidoHastaAqui, esPrimera, esUltima){
         let extras=[];
-        const { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador,tiemposPorPregunta,aciertosEquipoPorPregunta } =
+        const { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador } =
           this.contarPuntosAcumulativos(contenidoHastaAqui);
 
         extras.push('\n\n═══════════════════════════════════════════');
@@ -399,22 +393,31 @@
           }else extras.push('Aún no hay puntuaciones registradas');
         }
 
-        if(esUltima && Object.keys(tiemposPorPregunta).length){
-          let qDif=null, tMax=0;
-          for(const [q,t] of Object.entries(tiemposPorPregunta)){
-            if(t.inicio && t.primerAcierto){
-              const d=this.calcularDiferenciaTiempo(t.inicio,t.primerAcierto);
-              if(d>tMax){ tMax=d; qDif=parseInt(q,10); }
-            }
-          }
-          let qBrecha=null, bMax=0, eqGan=null;
-          for(const [q,acc] of Object.entries(aciertosEquipoPorPregunta)){
-            const vals=Object.values(acc), max=Math.max(...vals), min=Math.min(...vals), b=max-min;
-            if(b>bMax && max>0){ bMax=b; qBrecha=parseInt(q,10); eqGan=Object.entries(acc).sort((a,b)=>b[1]-a[1])[0][0]; }
-          }
+        // --- ESTADÍSTICAS DE PREGUNTAS SOLO EN LA PARTE FINAL: usar recordsGlobales para coherencia
+        if (esUltima && this.recordsGlobales) {
+          const rg = this.recordsGlobales;
           extras.push('\n📊 ESTADÍSTICAS DE PREGUNTAS:');
-          if(qDif) extras.push(`🐢 Pregunta con mayor dificultad: P${qDif} (el bot no dio el primer acertante hasta pasados ${tMax} segundos)`);
-          if(qBrecha) extras.push(`📈 Mayor brecha: P${qBrecha} (${eqGan} +${bMax})`);
+
+          if (rg.dificultad) {
+            extras.push(
+              `🐢 Pregunta con mayor dificultad: P${rg.dificultad.q} ` +
+              `(el bot no dio el primer acertante hasta pasados ${rg.dificultad.tiempo} segundos)`
+            );
+          }
+
+          if (rg.brecha) {
+            extras.push(
+              `📈 Mayor brecha: P${rg.brecha.q} ` +
+              `(${rg.brecha.ganador} +${rg.brecha.brecha})`
+            );
+          }
+
+          if (rg.racha) {
+            extras.push(
+              `🔥 Mayor racha interrumpida: ${rg.racha.jugador} ` +
+              `llevaba ${rg.racha.len} seguidas y se cortó en P${rg.racha.qCorte}`
+            );
+          }
         }
 
         if(esUltima){
@@ -429,7 +432,6 @@
           });
 
           extras.push('\n🏆 CLASIFICACIÓN POR EQUIPOS FINAL:');
-          // sumar por equipo puntos + (scratches/aces/palos) desde contadores individuales:
           const eStats={};
           for(const eq in this.equipos){ eStats[eq]={ puntos:puntosEquipo[eq]||0, scratches:0, aces:0, palos:0 }; }
           for(const j in this.jugadorEquipo){
@@ -557,24 +559,44 @@
 
     function descargarParte(nombre,contenido){
       const blob=new Blob([contenido],{type:"text/plain;charset=utf-8"});
-      const url=URL.createObjectURL(blob); const a=document.createElement('a');
-      a.href=url; a.download=nombre; a.click(); URL.revokeObjectURL(url);
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=nombre;
+      a.click();
+      URL.revokeObjectURL(url);
     }
+
     async function descargarZip(partes){
       try{
         showMessage('Generando archivo ZIP...','success');
-        const zip=new JSZip(); partes.forEach(p=>zip.file(p.nombre,p.contenido));
+        const zip=new JSZip();
+        partes.forEach(p=>zip.file(p.nombre,p.contenido));
         const blob=await zip.generateAsync({type:"blob"});
-        const url=URL.createObjectURL(blob); const a=document.createElement('a');
-        a.href=url; a.download="partes_trivial.zip"; a.click();
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url;
+        a.download="partes_trivial.zip";
+        a.click();
         URL.revokeObjectURL(url);
         showMessage('ZIP descargado correctamente','success');
-      }catch(e){ showMessage('Error al generar el archivo ZIP','error'); }
+      }catch(e){
+        showMessage('Error al generar el archivo ZIP','error');
+      }
     }
-    function formatFileSize(bytes){ if(bytes<1024)return bytes+' bytes'; if(bytes<1048576)return Math.round(bytes/1024)+' KB'; return Math.round(bytes/1048576)+' MB'; }
+
+    function formatFileSize(bytes){
+      if(bytes<1024) return bytes+' bytes';
+      if(bytes<1048576) return Math.round(bytes/1024)+' KB';
+      return Math.round(bytes/1048576)+' MB';
+    }
+
     function showMessage(msg,type){
-      const div=document.createElement('div'); div.className=`message ${type}`; div.textContent=msg; messages.appendChild(div);
-      setTimeout(()=>{ if(div.parentNode) div.parentNode.removeChild(div); },5000);
+      const div=document.createElement('div');
+      div.className=`message ${type}`;
+      div.textContent=msg;
+      messages.appendChild(div);
+      setTimeout(()=>{ if(div.parentNode){ div.parentNode.removeChild(div); } },5000);
     }
   </script>
 </body>
