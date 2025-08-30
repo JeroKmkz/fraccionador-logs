@@ -173,7 +173,11 @@
         };
 
         let maxDificultad={tiempo:-1,q:null};
-        let maxBrecha={brecha:-1,q:null,ganador:null};
+
+        // ———> Cambios para “mayor brecha” con múltiples ocurrencias y umbral +3
+        let maxBrechaVal=-1;
+        let brechasMaximas=[]; // [{q, ganador, brecha}]
+        // <———
 
         const iniciarPregunta=(num,ts)=>{
           currentQ=num; startTime=ts||null; firstHitTime=null;
@@ -187,22 +191,27 @@
             const t=diffSec(startTime, firstHitTime);
             if(t>maxDificultad.tiempo) maxDificultad={tiempo:t,q:currentQ};
           }
-          // brecha
+          // brecha (posibles empates al récord)
           const vals=Object.values(aciertosPorEquipoQ);
           if(vals.length){
             const max=Math.max(...vals), min=Math.min(...vals), b=max-min;
-            if(b>maxBrecha.brecha && max>0){
-              const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
-              maxBrecha={brecha:b,q:currentQ,ganador};
+            if(max>0){
+              if(b>maxBrechaVal){
+                maxBrechaVal=b;
+                const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
+                brechasMaximas=[{q:currentQ, ganador, brecha:b}];
+              }else if(b===maxBrechaVal && b>=0){
+                const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
+                brechasMaximas.push({q:currentQ, ganador, brecha:b});
+              }
             }
           }
-          // rachas: primero incrementos de quienes acertaron
+          // rachas
           jugadoresQueAcertaronEnQ.forEach(j=>{ streakActual[j]=(streakActual[j]||0)+1; });
-          // luego cortes: quienes no acertaron y tenían racha>0
           for(const j in this.jugadorEquipo){
             if(!jugadoresQueAcertaronEnQ.has(j) && (streakActual[j]||0)>0){
               const len=streakActual[j];
-              if(len>=8 && len>recordRachaCortada.len){
+              if(len>=8 && len>(recordRachaCortada.len||0)){
                 recordRachaCortada={len, jugador:j, qCorte:currentQ};
               }
               streakActual[j]=0;
@@ -236,21 +245,24 @@
           }
         }
 
+        // Aplicar umbral mínimo +3 para brecha
+        if(maxBrechaVal < 3){ brechasMaximas=[]; }
+
         this.recordsGlobales={
           dificultad:maxDificultad.tiempo>=0 ? maxDificultad : null,
-          brecha:maxBrecha.brecha>=0 ? maxBrecha : null,
+          brechas:brechasMaximas, // <<— array de ocurrencias
           racha:recordRachaCortada.len>=8 ? recordRachaCortada : null
         };
       }
 
-      // -------- 2ª pasada: inserción SOLO en las preguntas que ganaron el récord global --------
+      // -------- 2ª pasada: inserción en preguntas con récords globales --------
       anotarDatosEnLinea(contenido){
         if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
 
         const lineas=contenido.split('\n');
         let currentQ=null;
-        let inserted={ dificultad:false, brecha:false, racha:false };
 
+        const brechaQs = new Set((this.recordsGlobales.brechas||[]).map(b=>b.q));
         const nuevas=[];
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
@@ -262,27 +274,28 @@
           if(this.botNick && linea.includes(`<${this.botNick}>`) && currentQ!=null &&
              (/La buena:/i.test(linea) || /Las buenas:/i.test(linea))){
 
-            if(this.recordsGlobales.dificultad && !inserted.dificultad &&
+            // DIFICULTAD (única)
+            if(this.recordsGlobales.dificultad &&
                this.recordsGlobales.dificultad.q === currentQ){
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
               nuevas.push(`🐢 Pregunta con mayor dificultad de la partida: P${currentQ}. El bot no dio el primer acertante hasta pasados ${this.recordsGlobales.dificultad.tiempo} segundos.`);
-              inserted.dificultad=true;
             }
 
-            if(this.recordsGlobales.brecha && !inserted.brecha &&
-               this.recordsGlobales.brecha.q === currentQ){
-              const {brecha,ganador}=this.recordsGlobales.brecha;
-              nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-              nuevas.push(`📈 Mayor brecha de la partida: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
-              inserted.brecha=true;
+            // BRECHA: puede haber múltiples preguntas empatadas
+            if(brechaQs.has(currentQ)){
+              const ocurrencias = (this.recordsGlobales.brechas||[]).filter(b=>b.q===currentQ);
+              ocurrencias.forEach(({ganador,brecha})=>{
+                nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
+                nuevas.push(`📈 Mayor brecha de la partida: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
+              });
             }
 
-            if(this.recordsGlobales.racha && !inserted.racha &&
+            // RACHA (única)
+            if(this.recordsGlobales.racha &&
                this.recordsGlobales.racha.qCorte === currentQ){
               const {len,jugador}=this.recordsGlobales.racha;
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
               nuevas.push(`🔥 Mayor racha interrumpida de la partida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
-              inserted.racha=true;
             }
 
             currentQ=null;
@@ -293,7 +306,6 @@
 
       contarPuntosAcumulativos(contenidoHastaAqui){
         const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
-        const tiemposPorPregunta={}, aciertosEquipoPorPregunta={};
         for(const j in this.jugadorEquipo){ puntosPorJugador[j]=0; palosPorJugador[j]=0; acesPorJugador[j]=0; scratchesPorJugador[j]=0; }
         for(const e in this.equipos){ puntosEquipo[e]=0; }
 
@@ -302,8 +314,6 @@
           const mQ=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
           if(mQ){
             preguntaActual=parseInt(mQ[2],10);
-            tiemposPorPregunta[preguntaActual]={inicio:mQ[1], primerAcierto:null};
-            aciertosEquipoPorPregunta[preguntaActual]={}; for(const e in this.equipos) aciertosEquipoPorPregunta[preguntaActual][e]=0;
           }
           if(!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
 
@@ -320,20 +330,14 @@
               if(mScratch) scratchesPorJugador[jugador]++;
               if(mAce){ acesPorJugador[jugador]++; scratchesPorJugador[jugador]++; }
               const eq=this.jugadorEquipo[jugador];
-              if(eq){
-                puntosEquipo[eq]++;
-                if(preguntaActual && aciertosEquipoPorPregunta[preguntaActual]) aciertosEquipoPorPregunta[preguntaActual][eq]++;
-              }
-              if(preguntaActual && tiemposPorPregunta[preguntaActual] && !tiemposPorPregunta[preguntaActual].primerAcierto){
-                const mt=linea.match(/^(\d{2}:\d{2}:\d{2})/); if(mt) tiemposPorPregunta[preguntaActual].primerAcierto=mt[1];
-              }
+              if(eq){ puntosEquipo[eq]++; }
             }
           }else if(mPalo){
             jugador=mPalo[1]; if(palosPorJugador[jugador]!==undefined) palosPorJugador[jugador]++;
           }
         }
 
-        return { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador,tiemposPorPregunta,aciertosEquipoPorPregunta };
+        return { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador };
       }
 
       obtenerEstadisticasEquipos(){
@@ -345,11 +349,6 @@
           stats[eq]={ total:lista.length, presentes:pre.length, ausentes:aus.length, listaAusentes:aus };
         }
         return stats;
-      }
-
-      calcularDiferenciaTiempo(inicio, fin){
-        const [h1,m1,s1]=inicio.split(':').map(Number), [h2,m2,s2]=fin.split(':').map(Number);
-        let a=h1*3600+m1*60+s1, b=h2*3600+m2*60+s2; let d=b-a; if(d<0)d+=86400; return d;
       }
 
       generarResumen(contenidoHastaAqui, esPrimera, esUltima){
@@ -393,7 +392,7 @@
           }else extras.push('Aún no hay puntuaciones registradas');
         }
 
-        // --- ESTADÍSTICAS DE PREGUNTAS SOLO EN LA PARTE FINAL: usar recordsGlobales para coherencia
+        // --- ESTADÍSTICAS DE PREGUNTAS SOLO EN LA PARTE FINAL (recordsGlobales coherentes)
         if (esUltima && this.recordsGlobales) {
           const rg = this.recordsGlobales;
           extras.push('\n📊 ESTADÍSTICAS DE PREGUNTAS:');
@@ -405,11 +404,11 @@
             );
           }
 
-          if (rg.brecha) {
-            extras.push(
-              `📈 Mayor brecha: P${rg.brecha.q} ` +
-              `(${rg.brecha.ganador} +${rg.brecha.brecha})`
-            );
+          if (rg.brechas && rg.brechas.length) {
+            const desc = rg.brechas
+              .map(b => `P${b.q} (${b.ganador} +${b.brecha})`)
+              .join(', ');
+            extras.push(`📈 Mayor brecha: ${desc}`);
           }
 
           if (rg.racha) {
@@ -515,9 +514,7 @@
             analizador=new AnalizadorPartida();
             analizador.identificarBot(contenido);
             analizador.procesarEquipos(contenido);
-            // 1ª pasada: records globales
             analizador.precomputarRecordsGlobales(contenido);
-            // 2ª pasada: inserción solo en las preguntas de esos records
             contenido=analizador.anotarDatosEnLinea(contenido);
           }
 
