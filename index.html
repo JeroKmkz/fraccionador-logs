@@ -101,6 +101,7 @@
         this.botNick=null;
         this.jugadoresActivos=new Set();
         this.contenidoCompleto='';
+        this.totalPreguntas=null; // total detectado (denominador)
       }
 
       identificarBot(contenido){
@@ -174,13 +175,13 @@
 
         let maxDificultad={tiempo:-1,q:null};
 
-        // ———> Cambios para “mayor brecha” con múltiples ocurrencias y umbral +3
-        let maxBrechaVal=-1;
-        let brechasMaximas=[]; // [{q, ganador, brecha}]
-        // <———
+        // “parcial” con múltiples ocurrencias y umbral +3
+        let maxParcialVal=-1;
+        let parcialesMaximos=[]; // [{q, ganador, brecha}]
 
-        const iniciarPregunta=(num,ts)=>{
+        const iniciarPregunta=(num,ts,total=null)=>{
           currentQ=num; startTime=ts||null; firstHitTime=null;
+          if(total){ this.totalPreguntas = Math.max(this.totalPreguntas||0, total); }
           aciertosPorEquipoQ={}; Object.keys(this.equipos).forEach(eq=>aciertosPorEquipoQ[eq]=0);
           jugadoresQueAcertaronEnQ=new Set();
         };
@@ -191,18 +192,18 @@
             const t=diffSec(startTime, firstHitTime);
             if(t>maxDificultad.tiempo) maxDificultad={tiempo:t,q:currentQ};
           }
-          // brecha (posibles empates al récord)
+          // parcial (posibles empates)
           const vals=Object.values(aciertosPorEquipoQ);
           if(vals.length){
             const max=Math.max(...vals), min=Math.min(...vals), b=max-min;
             if(max>0){
-              if(b>maxBrechaVal){
-                maxBrechaVal=b;
+              if(b>maxParcialVal){
+                maxParcialVal=b;
                 const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
-                brechasMaximas=[{q:currentQ, ganador, brecha:b}];
-              }else if(b===maxBrechaVal && b>=0){
+                parcialesMaximos=[{q:currentQ, ganador, brecha:b}];
+              }else if(b===maxParcialVal && b>=0){
                 const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
-                brechasMaximas.push({q:currentQ, ganador, brecha:b});
+                parcialesMaximos.push({q:currentQ, ganador, brecha:b});
               }
             }
           }
@@ -222,8 +223,13 @@
 
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
-          const mStart=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
-          if(mStart){ iniciarPregunta(parseInt(mStart[2],10), mStart[1]); continue; }
+          const mStart=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*(\d+).*Base\s*Datos\s*Preguntas:/i);
+          if(mStart){
+            const qNum=parseInt(mStart[2],10);
+            const total=parseInt(mStart[3],10);
+            iniciarPregunta(qNum, mStart[1], total);
+            continue;
+          }
 
           if(isBotLine(linea) && currentQ!=null){
             const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
@@ -237,7 +243,9 @@
             if(nick){
               if(!firstHitTime){ const ts=tsOf(linea); if(ts) firstHitTime=ts; }
               const eq=this.jugadorEquipo[nick];
-              if(eq && aciertosPorEquipoQ[eq]!==undefined) aciertosPorEquipoQ[eq]+=1;
+              if(eq && eq in this.equipos){ // robustez
+                aciertosPorEquipoQ[eq]=(aciertosPorEquipoQ[eq]||0)+1;
+              }
               jugadoresQueAcertaronEnQ.add(nick);
             }
 
@@ -245,32 +253,55 @@
           }
         }
 
-        // Aplicar umbral mínimo +3 para brecha
-        if(maxBrechaVal < 3){ brechasMaximas=[]; }
+        // Aplicar umbral mínimo +3 para “parcial”
+        if(maxParcialVal < 3){ parcialesMaximos=[]; }
 
         this.recordsGlobales={
           dificultad:maxDificultad.tiempo>=0 ? maxDificultad : null,
-          brechas:brechasMaximas, // <<— array de ocurrencias
+          parciales:parcialesMaximos, // array de ocurrencias
           racha:recordRachaCortada.len>=8 ? recordRachaCortada : null
         };
       }
 
-      // -------- 2ª pasada: inserción en preguntas con récords globales --------
+      // -------- 2ª pasada: inserción en preguntas con récords globales + marcador sprint final --------
       anotarDatosEnLinea(contenido){
         if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
 
         const lineas=contenido.split('\n');
         let currentQ=null;
+        const parcialesQs = new Set((this.recordsGlobales.parciales||[]).map(b=>b.q));
 
-        const brechaQs = new Set((this.recordsGlobales.brechas||[]).map(b=>b.q));
+        // Puntuación acumulada por equipo para ir anunciando marcadores
+        const scoreEquipo = {}; Object.keys(this.equipos).forEach(eq=>scoreEquipo[eq]=0);
+
         const nuevas=[];
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
-          const mStart=linea.match(/^\d{2}:\d{2}:\d{2}.*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
-          if(mStart){ currentQ=parseInt(mStart[1],10); nuevas.push(linea); continue; }
+          const mStart=linea.match(/^\d{2}:\d{2}:\d{2}.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+          if(mStart){
+            currentQ=parseInt(mStart[1],10);
+            // (capturamos total si no se detectó antes)
+            const total=parseInt(mStart[2],10);
+            if(!this.totalPreguntas || total>this.totalPreguntas) this.totalPreguntas=total;
+            nuevas.push(linea);
+            continue;
+          }
+
+          // Contabilizar puntos en vivo para marcador sprint final
+          if(this.botNick && linea.includes(`<${this.botNick}>`)){
+            const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
+            const mAce=linea.match(/>>>(\S+)\s+acea/i);
+            const mAcierto=linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+            const nick = (mScratch&&mScratch[1]) || (mAce&&mAce[1]) || (mAcierto&&mAcierto[1]) || null;
+            if(nick){
+              const eq=this.jugadorEquipo[nick];
+              if(eq && (eq in scoreEquipo)) scoreEquipo[eq]+=1;
+            }
+          }
 
           nuevas.push(linea);
 
+          // Cierre de pregunta → insertar DATO EXTRA si toca
           if(this.botNick && linea.includes(`<${this.botNick}>`) && currentQ!=null &&
              (/La buena:/i.test(linea) || /Las buenas:/i.test(linea))){
 
@@ -281,13 +312,26 @@
               nuevas.push(`🐢 Pregunta con mayor dificultad de la partida: P${currentQ}. El bot no dio el primer acertante hasta pasados ${this.recordsGlobales.dificultad.tiempo} segundos.`);
             }
 
-            // BRECHA: puede haber múltiples preguntas empatadas
-            if(brechaQs.has(currentQ)){
-              const ocurrencias = (this.recordsGlobales.brechas||[]).filter(b=>b.q===currentQ);
+            // PARCIAL (múltiples ocurrencias del récord)
+            if(parcialesQs.has(currentQ)){
+              const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
               ocurrencias.forEach(({ganador,brecha})=>{
                 nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                nuevas.push(`📈 Mayor brecha de la partida: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
+                nuevas.push(`📈 Parcial de la partida: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
               });
+            }
+
+            // SPRINT FINAL: marcador si estamos en últimas 5 y diferencia ≤ 10
+            if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
+              const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
+              if(orden.length>=2){
+                const diff = Math.abs(orden[0][1]-orden[1][1]);
+                if(diff<=10){
+                  const marcador = orden.map(([eq,pts])=>`${eq} ${pts}`).join(' | ');
+                  nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
+                  nuevas.push(`⏱️ Marcador tras P${currentQ}: ${marcador} (dif ${diff})`);
+                }
+              }
             }
 
             // RACHA (única)
@@ -312,9 +356,7 @@
         let preguntaActual=null;
         for(const linea of contenidoHastaAqui.split('\n')){
           const mQ=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
-          if(mQ){
-            preguntaActual=parseInt(mQ[2],10);
-          }
+          if(mQ){ preguntaActual=parseInt(mQ[2],10); }
           if(!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
 
           const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
@@ -404,11 +446,11 @@
             );
           }
 
-          if (rg.brechas && rg.brechas.length) {
-            const desc = rg.brechas
+          if (rg.parciales && rg.parciales.length) {
+            const desc = rg.parciales
               .map(b => `P${b.q} (${b.ganador} +${b.brecha})`)
               .join(', ');
-            extras.push(`📈 Mayor brecha: ${desc}`);
+            extras.push(`📈 Parcial más favorable: ${desc}`);
           }
 
           if (rg.racha) {
