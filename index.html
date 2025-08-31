@@ -603,21 +603,37 @@
     }
 
     function mostrarResultados(partes,numPartes){
-      results.innerHTML=`<h3>📦 Archivos Generados (${numPartes} partes)</h3>`;
-      partes.forEach(parte=>{
-        const fileItem=document.createElement('div'); fileItem.className='file-item';
-        const info=document.createElement('div'); info.innerHTML=`<strong>${parte.nombre}</strong><br>${parte.lineas} líneas | ${formatFileSize(parte.contenido.length)}`;
-        const btn=document.createElement('button'); btn.className='download-btn'; btn.textContent='Descargar';
-        btn.onclick=()=>descargarParte(parte.nombre, parte.contenido);
-        fileItem.appendChild(info); fileItem.appendChild(btn); results.appendChild(fileItem);
-      });
-      if(partes.length>1){
-        const btnZip=document.createElement('button'); btn.className='button success'; btn.textContent='📦 Descargar todas en ZIP';
-        btnZip.onclick=()=>descargarZip(partes); results.appendChild(btnZip);
-      }
-      results.classList.add('show');
-      showMessage(`Log procesado correctamente en ${numPartes} partes`,'success');
-    }
+  results.innerHTML = `<h3>📦 Archivos Generados (${numPartes} partes)</h3>`;
+
+  partes.forEach(parte=>{
+    const fileItem = document.createElement('div');
+    fileItem.className = 'file-item';
+
+    const info = document.createElement('div');
+    info.innerHTML = `<strong>${parte.nombre}</strong><br>${parte.lineas} líneas | ${formatFileSize(parte.contenido.length)}`;
+
+    const btn = document.createElement('button');
+    btn.className = 'download-btn';
+    btn.textContent = 'Descargar';
+    btn.onclick = () => descargarParte(parte.nombre, parte.contenido);
+
+    fileItem.appendChild(info);
+    fileItem.appendChild(btn);
+    results.appendChild(fileItem);
+  });
+
+  if (partes.length > 1) {
+    const btnZip = document.createElement('button');
+    btnZip.className = 'button success';
+    btnZip.textContent = '📦 Descargar todas en ZIP';
+    btnZip.onclick = () => descargarZip(partes);
+    results.appendChild(btnZip);
+  }
+
+  results.classList.add('show');
+  showMessage(`Log procesado correctamente en ${numPartes} partes`, 'success');
+}
+
 
     function descargarParte(nombre,contenido){
       const blob=new Blob([contenido],{type:"text/plain;charset=utf-8"});
