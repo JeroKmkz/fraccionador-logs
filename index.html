@@ -94,6 +94,20 @@
     fileInput.onchange=e=>{ if(e.target.files.length>0) handleFile(e.target.files[0]); };
     processBtn.onclick=()=>processLog();
 
+    // -------- Normalización "sólo para detectar", sin alterar el contenido real --------
+    function stripIrcCodes(s){
+      if(!s) return s;
+      return s
+        .replace(/\x03\d{1,2}(?:,\d{1,2})?/g,"") // mIRC colors
+        .replace(/\x02/g,"") // bold
+        .replace(/\x1D/g,"") // italics
+        .replace(/\x1F/g,"") // underline
+        .replace(/\x0F/g,"") // reset
+        .replace(/\x7F/g,"") // del
+        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g,""); // ANSI
+    }
+    function plain(line){ return stripIrcCodes(line); }
+
     class AnalizadorPartida{
       constructor(){
         this.equipos={};
@@ -107,8 +121,9 @@
       identificarBot(contenido){
         this.contenidoCompleto=contenido;
         for(const linea of contenido.split('\n')){
-          if(linea.includes('--- Equipos participantes ---')){
-            const m=linea.match(/<([^>]+)>/); if(m){ this.botNick=m[1]; return; }
+          const pl = plain(linea);
+          if(pl.includes('--- Equipos participantes ---')){
+            const m=pl.match(/<([^>]+)>/); if(m){ this.botNick=m[1]; return; }
           }
         }
       }
@@ -117,14 +132,15 @@
         const lineas=contenido.split('\n');
         let dentro=false, equipoActual=null;
         for(const linea of lineas){
-          if(linea.includes('--- Equipos participantes ---')){ dentro=true; continue; }
-          if(linea.includes('--- DATOS RESETEADOS ---')){ dentro=false; break; }
-          if(dentro && this.botNick && linea.includes(`<${this.botNick}>`)){
-            if(!linea.includes('>>>')){
+          const pl = plain(linea);
+          if(pl.includes('--- Equipos participantes ---')){ dentro=true; continue; }
+          if(pl.includes('--- DATOS RESETEADOS ---')){ dentro=false; break; }
+          if(dentro && this.botNick && pl.includes(`<${this.botNick}>`)){
+            if(!pl.includes('>>>')){
               const posibles=['FOGUETES','LIDERES','KAMIKAZES','ATIPIK@S','REPESCA@S','HARDBE@TS','TELERINEZ'];
-              for(const eq of posibles){ if(linea.includes(eq)){ equipoActual=eq; this.equipos[eq]=[]; break; } }
+              for(const eq of posibles){ if(pl.includes(eq)){ equipoActual=eq; this.equipos[eq]=[]; break; } }
             }else if(equipoActual){
-              const m=linea.match(/>>>\s*(.+)/);
+              const m=pl.match(/>>>\s*(.+)/);
               if(m){
                 const jugadores=m[1].trim().split(/\s+/);
                 this.equipos[equipoActual]=jugadores;
@@ -140,14 +156,15 @@
         const total=Object.keys(this.jugadorEquipo).length;
         for(const linea of this.contenidoCompleto.split('\n')){
           if(this.jugadoresActivos.size===total) break;
-          const m=linea.match(/<([^>]+)>/); if(!m) continue;
+          const pl = plain(linea);
+          const m=pl.match(/<([^>]+)>/); if(!m) continue;
           const nick=m[1];
           if(nick===this.botNick ||
-             linea.includes('--- Equipos participantes ---') ||
-             linea.includes('>>>') ||
-             linea.includes('--- DATOS RESETEADOS ---') ||
-             linea.includes('Base Datos Preguntas:') ||
-             linea.includes('Pregunta:')) continue;
+             pl.includes('--- Equipos participantes ---') ||
+             pl.includes('>>>') ||
+             pl.includes('--- DATOS RESETEADOS ---') ||
+             pl.includes('Base Datos Preguntas:') ||
+             pl.includes('Pregunta:')) continue;
           for(const jr in this.jugadorEquipo){
             if(nick.toLowerCase()===jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
               this.jugadoresActivos.add(jr); break;
@@ -166,8 +183,8 @@
         const streakActual={}; // jugador -> longitud
         let recordRachaCortada={len:0,jugador:null,qCorte:null};
 
-        const isBotLine = l => this.botNick && l.includes(`<${this.botNick}>`);
-        const tsOf = l => { const m=l.match(/^(\d{2}:\d{2}:\d{2})/); return m?m[1]:null; };
+        const isBotLine = l => this.botNick && plain(l).includes(`<${this.botNick}>`);
+        const tsOf = l => { const m=plain(l).match(/^(\d{2}:\d{2}:\d{2})/); return m?m[1]:null; };
         const diffSec = (a,b)=>{
           const [h1,m1,s1]=a.split(':').map(Number), [h2,m2,s2]=b.split(':').map(Number);
           let x=h1*3600+m1*60+s1, y=h2*3600+m2*60+s2; let d=y-x; if(d<0) d+=86400; return d;
@@ -223,7 +240,8 @@
 
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
-          const mStart=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*(\d+).*Base\s*Datos\s*Preguntas:/i);
+          const pl = plain(linea);
+          const mStart=pl.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*(\d+).*Base\s*Datos\s*Preguntas:/i);
           if(mStart){
             const qNum=parseInt(mStart[2],10);
             const total=parseInt(mStart[3],10);
@@ -232,9 +250,9 @@
           }
 
           if(isBotLine(linea) && currentQ!=null){
-            const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
-            const mAce=linea.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
+            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
+            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
             let nick=null;
             if(mScratch) nick=mScratch[1];
             else if(mAce) nick=mAce[1];
@@ -243,13 +261,13 @@
             if(nick){
               if(!firstHitTime){ const ts=tsOf(linea); if(ts) firstHitTime=ts; }
               const eq=this.jugadorEquipo[nick];
-              if(eq && eq in this.equipos){ // robustez
+              if(eq && eq in this.equipos){
                 aciertosPorEquipoQ[eq]=(aciertosPorEquipoQ[eq]||0)+1;
               }
               jugadoresQueAcertaronEnQ.add(nick);
             }
 
-            if(/La buena:/i.test(linea) || /Las buenas:/i.test(linea)){ cerrarPregunta(); }
+            if(/La buena:/i.test(pl) || /Las buenas:/i.test(pl)){ cerrarPregunta(); }
           }
         }
 
@@ -277,10 +295,10 @@
         const nuevas=[];
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
-          const mStart=linea.match(/^\d{2}:\d{2}:\d{2}.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+          const pl = plain(linea);
+          const mStart=pl.match(/^\d{2}:\d{2}:\d{2}.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
           if(mStart){
             currentQ=parseInt(mStart[1],10);
-            // (capturamos total si no se detectó antes)
             const total=parseInt(mStart[2],10);
             if(!this.totalPreguntas || total>this.totalPreguntas) this.totalPreguntas=total;
             nuevas.push(linea);
@@ -288,10 +306,10 @@
           }
 
           // Contabilizar puntos en vivo para marcador sprint final
-          if(this.botNick && linea.includes(`<${this.botNick}>`)){
-            const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
-            const mAce=linea.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+          if(this.botNick && pl.includes(`<${this.botNick}>`)){
+            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
+            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
+            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
             const nick = (mScratch&&mScratch[1]) || (mAce&&mAce[1]) || (mAcierto&&mAcierto[1]) || null;
             if(nick){
               const eq=this.jugadorEquipo[nick];
@@ -302,8 +320,8 @@
           nuevas.push(linea);
 
           // Cierre de pregunta → insertar DATO EXTRA si toca
-          if(this.botNick && linea.includes(`<${this.botNick}>`) && currentQ!=null &&
-             (/La buena:/i.test(linea) || /Las buenas:/i.test(linea))){
+          if(this.botNick && pl.includes(`<${this.botNick}>`) && currentQ!=null &&
+             (/La buena:/i.test(pl) || /Las buenas:/i.test(pl))){
 
             // DIFICULTAD (única)
             if(this.recordsGlobales.dificultad &&
@@ -355,14 +373,15 @@
 
         let preguntaActual=null;
         for(const linea of contenidoHastaAqui.split('\n')){
-          const mQ=linea.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
+          const pl = plain(linea);
+          const mQ=pl.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
           if(mQ){ preguntaActual=parseInt(mQ[2],10); }
-          if(!this.botNick || !linea.includes(`<${this.botNick}>`)) continue;
+          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
 
-          const mScratch=linea.match(/>>>(\S+)\s+scratchea/i);
-          const mAce=linea.match(/>>>(\S+)\s+acea/i);
-          const mAcierto=linea.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
-          const mPalo=linea.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/i);
+          const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
+          const mAce    =pl.match(/>>>(\S+)\s+acea/i);
+          const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/i);
 
           let jugador=null;
           if(mScratch || mAce || mAcierto){
@@ -455,7 +474,7 @@
 
           if (rg.racha) {
             extras.push(
-              `🔥 Mayor racha interrumpida: ${rg.racha.jugador} ` +
+              `🔥 Racha interrumpida: ${rg.racha.jugador} ` +
               `llevaba ${rg.racha.len} seguidas y se cortó en P${rg.racha.qCorte}`
             );
           }
@@ -508,10 +527,14 @@
         .trim();
     }
     function limpiarArchivo(contenido){ return contenido.split("\n").map(limpiarLinea).join("\n"); }
+
     function encontrarPosicionesPreguntas(contenido){
-      const pos=[]; contenido.split("\n").forEach((l,i)=>{ if(/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(l)) pos.push(i); });
+      const pos=[]; contenido.split("\n").forEach((l,i)=>{
+        if(/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(plain(l))) pos.push(i);
+      });
       return pos;
     }
+
     function dividirArchivo(contenido,numPartes=4){
       const lineas=contenido.split("\n");
       const posiciones=encontrarPosicionesPreguntas(contenido);
@@ -589,7 +612,7 @@
         fileItem.appendChild(info); fileItem.appendChild(btn); results.appendChild(fileItem);
       });
       if(partes.length>1){
-        const btnZip=document.createElement('button'); btnZip.className='button success'; btnZip.textContent='📦 Descargar todas en ZIP';
+        const btnZip=document.createElement('button'); btn.className='button success'; btn.textContent='📦 Descargar todas en ZIP';
         btnZip.onclick=()=>descargarZip(partes); results.appendChild(btnZip);
       }
       results.classList.add('show');
