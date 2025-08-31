@@ -317,7 +317,7 @@
               const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
               ocurrencias.forEach(({ganador,brecha})=>{
                 nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                nuevas.push(`📈 Parcial de la partida: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
+                nuevas.push(`📈 Parcial de la pregunta: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
               });
             }
 
@@ -339,7 +339,7 @@
                this.recordsGlobales.racha.qCorte === currentQ){
               const {len,jugador}=this.recordsGlobales.racha;
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-              nuevas.push(`🔥 Mayor racha interrumpida de la partida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
+              nuevas.push(`🔥 Racha interrumpida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
             }
 
             currentQ=null;
