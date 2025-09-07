@@ -88,916 +88,496 @@
   </div>
 
   <script>
-    let selectedFile=null;
-    const uploadArea=document.getElementById('uploadArea');
-    const fileInput=document.getElementById('fileInput');
-    const uploadText=document.getElementById('uploadText');
-    const processBtn=document.getElementById('processBtn');
-    const messages=document.getElementById('messages');
-    const results=document.getElementById('results');
+    // Variables globales
+    let selectedFile = null;
+    
+    // Referencias DOM
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const uploadText = document.getElementById('uploadText');
+    const processBtn = document.getElementById('processBtn');
+    const messages = document.getElementById('messages');
+    const results = document.getElementById('results');
 
-    uploadArea.onclick=()=>fileInput.click();
-    uploadArea.ondragover=e=>{e.preventDefault();uploadArea.classList.add('dragover');};
-    uploadArea.ondragleave=e=>{e.preventDefault();uploadArea.classList.remove('dragover');};
-    uploadArea.ondrop=e=>{
-      e.preventDefault();uploadArea.classList.remove('dragover');
-      const files=e.dataTransfer.files; if(files.length>0) handleFile(files[0]);
-    };
-    fileInput.onchange=e=>{ if(e.target.files.length>0) handleFile(e.target.files[0]); };
-    processBtn.onclick=()=>processLog();
+    // Event listeners
+    uploadArea.addEventListener('click', () => fileInput.click());
+    
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    
+    uploadArea.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      const files = e.dataTransfer.files;
+      if(files.length > 0) handleFile(files[0]);
+    });
+    
+    fileInput.addEventListener('change', (e) => {
+      if(e.target.files.length > 0) handleFile(e.target.files[0]);
+    });
+    
+    processBtn.addEventListener('click', processLog);
 
-    // -------- Normalización "sólo para detectar", sin alterar el contenido real --------
-    function stripIrcCodes(s){
+    // Función para limpiar códigos IRC
+    function stripIrcCodes(s) {
       if(!s) return s;
       return s
-        .replace(/\x03\d{0,2}(?:,\d{1,2})?/g,"") // mIRC colors - mejorado para detectar colores sin dígitos
-        .replace(/[\x02\x1D\x1F\x0F\x16\x7F]/g,"") // otros códigos IRC
-        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g,""); // ANSI
+        .replace(/\x03\d{0,2}(?:,\d{1,2})?/g, "") // mIRC colors
+        .replace(/[\x02\x1D\x1F\x0F\x16\x7F]/g, "") // otros códigos IRC
+        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, ""); // ANSI
     }
     
-    function plain(line){ 
+    function plain(line) { 
       return stripIrcCodes(line); 
     }
 
-    // -------- Limpieza máxima (compactar para crónica) --------
-    function limpiarArchivoMax(contenido){
+    // Limpieza máxima para crónicas
+    function limpiarArchivoMax(contenido) {
       const lineas = contenido.split('\n');
       const out = [];
       let skipScore = false;
       let skipAciertos = false;
 
-      const shouldStopSkip = (pl) => (
-        /Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl) ||
-        /Base\s*Datos\s*Preguntas:/i.test(pl) ||
-        /<[^>]+>/.test(pl) ||
-        /La(s)?\s+buena(s)?:/i.test(pl) ||
-        /---/.test(pl)
-      );
-
-      for(let i=0;i<lineas.length;i++){
+      for(let i = 0; i < lineas.length; i++) {
         let line = lineas[i];
         const pl = plain(line);
 
-        // ¿estamos saltando bloque de "Puntuación de equipos"?
-        if(skipScore){
-          if(shouldStopSkip(pl)) skipScore=false;
-          else continue;
+        // Detectar bloques a saltar
+        if(skipScore) {
+          if(/Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl) || 
+             /<[^>]+>/.test(pl) || 
+             /La(s)?\s+buena(s)?:/i.test(pl) || 
+             /---/.test(pl)) {
+            skipScore = false;
+          } else {
+            continue;
+          }
         }
-        // ¿estamos saltando bloque de "Respuestas acertadas"?
-        if(skipAciertos){
-          if(shouldStopSkip(pl)) skipAciertos=false;
-          else continue;
+        
+        if(skipAciertos) {
+          if(/Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl) || 
+             /<[^>]+>/.test(pl) || 
+             /La(s)?\s+buena(s)?:/i.test(pl) || 
+             /---/.test(pl)) {
+            skipAciertos = false;
+          } else {
+            continue;
+          }
         }
 
-        // Inicios de bloques a omitir
-        if(/Puntuación\s+de\s+equipos/i.test(pl)){
+        // Detectar inicio de bloques
+        if(/Puntuación\s+de\s+equipos/i.test(pl)) {
           skipScore = true;
           continue;
         }
-        if(/Respuestas\s+acertadas/i.test(pl)){
+        
+        if(/Respuestas\s+acertadas/i.test(pl)) {
           skipAciertos = true;
           continue;
         }
 
-        // Quitar 'Mandada por: ...' en líneas de La buena/Las buenas (conserva el resto)
-        if(/La(s)?\s+buena(s)?:/i.test(pl)){
+        // Detectar y omitir líneas de ranking
+        const plSinBot = pl.replace(/<[^>]+>\s*/, '');
+        
+        // Puntuaciones individuales: "4 ·CLYDE82–DANI_1026–"
+        if(/^\d+\s*·/.test(plSinBot)) continue;
+        
+        // Puntuaciones de equipos: "1º 15 LIDERES"
+        if(/^\d+º\s+\d+\s+\w+/.test(plSinBot)) continue;
+
+        // Limpiezas de línea
+        // Quitar 'Mandada por: ...'
+        if(/La(s)?\s+buena(s)?:/i.test(pl)) {
           line = line.replace(/(\bLa(?:s)?\s+buena(?:s)?:[^]*?)(\s+Mandada\s+por:.*)$/i, "$1");
         }
 
-        // Quitar timestamps al inicio
+        // Eliminar "Base Datos Preguntas: ..."
+        line = line.replace(/\s*Base\s+Datos\s+Preguntas:\s*\S*/gi, "");
+
+        // Quitar timestamps
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
-        // Quitar líneas cortas de relleno
+        // Quitar símbolo '<' inicial de nicks
+        line = line.replace(/^<([^>]+)>/, "$1>");
+
+        // Cambiar >>> por >>
+        line = line.replace(/>>>/g, ">>");
+
+        // Filtrar líneas muy cortas
         const short = pl.trim().toLowerCase();
-        if(short.length <= 6 && /^(x+d+|j+a+ja+|j+e+je+|lol+|lmao+|uy+|uff+|ah+|em+)$/.test(short)){
+        if(short.length <= 6 && /^(x+d+|j+a+ja+|j+e+je+|lol+|lmao+|uy+|uff+|ah+|em+)$/.test(short)) {
           continue;
         }
 
         out.push(line);
       }
+      
       return out.join('\n');
     }
 
-    class AnalizadorPartida{
-      constructor(){
-        this.equipos={};
-        this.jugadorEquipo={};
-        this.botNick=null;
-        this.jugadoresActivos=new Set();
-        this.contenidoCompleto='';
-        this.totalPreguntas=null;
+    // Clase para análisis de partida
+    class AnalizadorPartida {
+      constructor() {
+        this.equipos = {};
+        this.jugadorEquipo = {};
+        this.botNick = null;
+        this.jugadoresActivos = new Set();
+        this.contenidoCompleto = '';
+        this.totalPreguntas = null;
+        this.recordsGlobales = null;
       }
 
-      identificarBot(contenido){
-        this.contenidoCompleto=contenido;
-        for(const linea of contenido.split('\n')){
+      identificarBot(contenido) {
+        this.contenidoCompleto = contenido;
+        for(const linea of contenido.split('\n')) {
           const pl = plain(linea);
-          if(pl.includes('--- Equipos participantes ---')){
-            const m=pl.match(/<([^>]+)>/); 
-            if(m){ 
-              this.botNick=m[1]; 
+          if(pl.includes('--- Equipos participantes ---')) {
+            const m = pl.match(/<([^>]+)>/);
+            if(m) {
+              this.botNick = m[1];
               console.log('Bot identificado:', this.botNick);
-              return; 
+              return;
             }
           }
         }
       }
 
-      procesarEquipos(contenido){
-        const lineas=contenido.split('\n');
-        let dentro=false, equipoActual=null;
+      procesarEquipos(contenido) {
+        const lineas = contenido.split('\n');
+        let dentro = false;
+        let equipoActual = null;
         
-        for(const linea of lineas){
+        for(const linea of lineas) {
           const pl = plain(linea);
           
-          if(pl.includes('--- Equipos participantes ---')){ 
-            dentro=true; 
-            continue; 
-          }
-          if(pl.includes('--- DATOS RESETEADOS ---')){ 
-            dentro=false; 
-            break; 
+          if(pl.includes('--- Equipos participantes ---')) {
+            dentro = true;
+            continue;
           }
           
-          if(dentro && this.botNick && pl.includes(`<${this.botNick}>`)){
-            // Detectar nombre de equipo
-            if(!pl.includes('>>>')){
-              const posibles=['FOGUETES','LIDERES','KAMIKAZES','ATIPIK@S','REPESCA@S','HARDBE@TS','TELERINEZ'];
-              for(const eq of posibles){ 
-                if(pl.includes(eq)){ 
-                  equipoActual=eq; 
-                  this.equipos[eq]=[]; 
-                  console.log('Equipo detectado:', eq);
-                  break; 
-                } 
+          if(pl.includes('--- DATOS RESETEADOS ---')) {
+            dentro = false;
+            break;
+          }
+          
+          if(dentro && this.botNick && pl.includes(`<${this.botNick}>`)) {
+            if(!pl.includes('>>>')) {
+              const equipos = ['FOGUETES', 'LIDERES', 'KAMIKAZES', 'ATIPIK@S', 'REPESCA@S', 'HARDBE@TS', 'TELERINEZ'];
+              for(const eq of equipos) {
+                if(pl.includes(eq)) {
+                  equipoActual = eq;
+                  this.equipos[eq] = [];
+                  break;
+                }
               }
-            }
-            // Detectar jugadores del equipo
-            else if(equipoActual && pl.includes('>>>')){
-              const m=pl.match(/>>>\s*(.+)/);
-              if(m){
-                const jugadores=m[1].trim().split(/\s+/);
-                this.equipos[equipoActual]=jugadores;
-                jugadores.forEach(j=>{ 
-                  this.jugadorEquipo[j]=equipoActual; 
+            } else if(equipoActual) {
+              const m = pl.match(/>>>\s*(.+)/);
+              if(m) {
+                const jugadores = m[1].trim().split(/\s+/);
+                this.equipos[equipoActual] = jugadores;
+                jugadores.forEach(j => {
+                  this.jugadorEquipo[j] = equipoActual;
                 });
-                console.log(`Jugadores de ${equipoActual}:`, jugadores);
               }
             }
           }
         }
         
-        this.detectarJugadoresActivosEnTodoElLog();
+        this.detectarJugadoresActivos();
       }
 
-      detectarJugadoresActivosEnTodoElLog(){
-        const total=Object.keys(this.jugadorEquipo).length;
-        for(const linea of this.contenidoCompleto.split('\n')){
-          if(this.jugadoresActivos.size===total) break;
+      detectarJugadoresActivos() {
+        for(const linea of this.contenidoCompleto.split('\n')) {
           const pl = plain(linea);
-          const m=pl.match(/<([^>]+)>/); 
+          const m = pl.match(/<([^>]+)>/);
           if(!m) continue;
           
-          const nick=m[1];
-          if(nick===this.botNick ||
-             pl.includes('--- Equipos participantes ---') ||
-             pl.includes('>>>') ||
-             pl.includes('--- DATOS RESETEADOS ---') ||
-             pl.includes('Base Datos Preguntas:') ||
-             pl.includes('Pregunta:')) continue;
-             
-          for(const jr in this.jugadorEquipo){
-            if(nick.toLowerCase()===jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
-              this.jugadoresActivos.add(jr); 
-              break;
+          const nick = m[1];
+          if(nick === this.botNick) continue;
+          
+          for(const jugador in this.jugadorEquipo) {
+            if(nick.toLowerCase() === jugador.toLowerCase()) {
+              this.jugadoresActivos.add(jugador);
             }
           }
         }
-        console.log('Jugadores activos detectados:', this.jugadoresActivos.size);
       }
 
-      precomputarRecordsGlobales(contenido){
-        const lineas=contenido.split('\n');
-        let currentQ=null, startTime=null, firstHitTime=null;
-        let aciertosPorEquipoQ={};
-        let jugadoresQueAcertaronEnQ=new Set();
-
-        const streakActual={};
-        let recordRachaCortada={len:0,jugador:null,qCorte:null};
-
-        const isBotLine = l => this.botNick && plain(l).includes(`<${this.botNick}>`);
-        const tsOf = l => { 
-          const m=l.match(/^(\d{2}:\d{2}:\d{2})/); 
-          return m?m[1]:null; 
+      precomputarRecords(contenido) {
+        // Implementación simplificada
+        this.recordsGlobales = {
+          dificultad: null,
+          parciales: [],
+          racha: null
         };
-        const diffSec = (a,b)=>{
-          const [h1,m1,s1]=a.split(':').map(Number), [h2,m2,s2]=b.split(':').map(Number);
-          let x=h1*3600+m1*60+s1, y=h2*3600+m2*60+s2; 
-          let d=y-x; 
-          if(d<0) d+=86400; 
-          return d;
-        };
+      }
 
-        let maxDificultad={tiempo:-1,q:null};
-        let maxParcialVal=-1;
-        let parcialesMaximos=[];
-
-        const iniciarPregunta=(num,ts,total=null)=>{
-          currentQ=num; 
-          startTime=ts||null; 
-          firstHitTime=null;
-          if(total){ 
-            this.totalPreguntas = Math.max(this.totalPreguntas||0, total); 
-          }
-          aciertosPorEquipoQ={}; 
-          Object.keys(this.equipos).forEach(eq=>aciertosPorEquipoQ[eq]=0);
-          jugadoresQueAcertaronEnQ=new Set();
-        };
-
-        const cerrarPregunta=()=>{
-          if(startTime && firstHitTime){
-            const t=diffSec(startTime, firstHitTime);
-            if(t>maxDificultad.tiempo) maxDificultad={tiempo:t,q:currentQ};
-          }
-          
-          const vals=Object.values(aciertosPorEquipoQ);
-          if(vals.length){
-            const max=Math.max(...vals), min=Math.min(...vals), b=max-min;
-            if(max>0){
-              if(b>maxParcialVal){
-                maxParcialVal=b;
-                const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
-                parcialesMaximos=[{q:currentQ, ganador, brecha:b}];
-              }else if(b===maxParcialVal && b>=0){
-                const ganador=Object.entries(aciertosPorEquipoQ).sort((a,b)=>b[1]-a[1])[0][0];
-                parcialesMaximos.push({q:currentQ, ganador, brecha:b});
-              }
-            }
-          }
-          
-          jugadoresQueAcertaronEnQ.forEach(j=>{ 
-            streakActual[j]=(streakActual[j]||0)+1; 
-          });
-          
-          for(const j in this.jugadorEquipo){
-            if(!jugadoresQueAcertaronEnQ.has(j) && (streakActual[j]||0)>0){
-              const len=streakActual[j];
-              if(len>=8 && len>(recordRachaCortada.len||0)){
-                recordRachaCortada={len, jugador:j, qCorte:currentQ};
-              }
-              streakActual[j]=0;
-            }
-          }
-          
-          currentQ=null; 
-          startTime=null; 
-          firstHitTime=null; 
-          aciertosPorEquipoQ={}; 
-          jugadoresQueAcertaronEnQ=new Set();
-        };
-
-        for(let i=0;i<lineas.length;i++){
-          const linea=lineas[i];
-          const pl = plain(linea);
-          
-          // Patrón mejorado para detectar preguntas
-          const mStart=pl.match(/Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
-          if(mStart){
-            const qNum=parseInt(mStart[1],10);
-            const total=parseInt(mStart[2],10);
-            const ts = tsOf(linea);
-            iniciarPregunta(qNum, ts, total);
-            continue;
-          }
-
-          if(isBotLine(linea) && currentQ!=null){
-            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
-            let nick=null;
-            
-            if(mScratch) nick=mScratch[1];
-            else if(mAce) nick=mAce[1];
-            else if(mAcierto) nick=mAcierto[1];
-
-            if(nick){
-              if(!firstHitTime){ 
-                const ts=tsOf(linea); 
-                if(ts) firstHitTime=ts; 
-              }
-              const eq=this.jugadorEquipo[nick];
-              if(eq && eq in this.equipos){
-                aciertosPorEquipoQ[eq]=(aciertosPorEquipoQ[eq]||0)+1;
-              }
-              jugadoresQueAcertaronEnQ.add(nick);
-            }
-
-            if(/La buena:/i.test(pl) || /Las buenas:/i.test(pl)){ 
-              cerrarPregunta(); 
-            }
-          }
-        }
-
-        if(maxParcialVal < 3){ 
-          parcialesMaximos=[]; 
-        }
-
-        this.recordsGlobales={
-          dificultad:maxDificultad.tiempo>=0 ? maxDificultad : null,
-          parciales:parcialesMaximos,
-          racha:recordRachaCortada.len>=8 ? recordRachaCortada : null
-        };
+      generarResumen(contenidoHastaAqui, esPrimera, esUltima) {
+        const extras = [];
         
-        console.log('Records globales computados:', this.recordsGlobales);
-      }
-
-      anotarDatosEnLinea(contenido){
-        if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
-
-        const lineas=contenido.split('\n');
-        let currentQ=null;
-        const parcialesQs = new Set((this.recordsGlobales.parciales||[]).map(b=>b.q));
-
-        const scoreEquipo = {}; 
-        Object.keys(this.equipos).forEach(eq=>scoreEquipo[eq]=0);
-
-        const nuevas=[];
-        for(let i=0;i<lineas.length;i++){
-          const linea=lineas[i];
-          const pl = plain(linea);
-          
-          const mStart=pl.match(/Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
-          if(mStart){
-            currentQ=parseInt(mStart[1],10);
-            const total=parseInt(mStart[2],10);
-            if(!this.totalPreguntas || total>this.totalPreguntas) this.totalPreguntas=total;
-            nuevas.push(linea);
-            continue;
-          }
-
-          if(this.botNick && pl.includes(`<${this.botNick}>`)){
-            // Detectar con >>> o >> (para compatibilidad)
-            const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
-            const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
-            const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
-            const nick = (mScratch&&mScratch[1]) || (mAce&&mAce[1]) || (mAcierto&&mAcierto[1]) || null;
-            if(nick){
-              const eq=this.jugadorEquipo[nick];
-              if(eq && (eq in scoreEquipo)) scoreEquipo[eq]+=1;
-            }
-          }
-
-          nuevas.push(linea);
-
-          if(this.botNick && pl.includes(`<${this.botNick}>`) && currentQ!=null &&
-             (/La buena:/i.test(pl) || /Las buenas:/i.test(pl))){
-
-            if(this.recordsGlobales.dificultad &&
-               this.recordsGlobales.dificultad.q === currentQ){
-              nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-              nuevas.push(`🐢 Pregunta con mayor dificultad de la partida: P${currentQ}. El bot no dio el primer acertante hasta pasados ${this.recordsGlobales.dificultad.tiempo} segundos.`);
-            }
-
-            if(parcialesQs.has(currentQ)){
-              const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
-              ocurrencias.forEach(({ganador,brecha})=>{
-                nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                nuevas.push(`📈 Parcial de la pregunta: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
-              });
-            }
-
-            if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
-              const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
-              if(orden.length>=2){
-                const diff = Math.abs(orden[0][1]-orden[1][1]);
-                if(diff<=10){
-                  const marcador = orden.map(([eq,pts])=>`${eq} ${pts}`).join(' | ');
-                  nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                  nuevas.push(`⏱️ Marcador tras P${currentQ}: ${marcador} (dif ${diff})`);
-                }
-              }
-            }
-
-            if(this.recordsGlobales.racha &&
-               this.recordsGlobales.racha.qCorte === currentQ){
-              const {len,jugador}=this.recordsGlobales.racha;
-              nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-              nuevas.push(`🔥 Racha interrumpida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
-            }
-
-            currentQ=null;
-          }
-        }
-        return nuevas.join('\n');
-      }
-
-      contarPuntosAcumulativos(contenidoHastaAqui){
-        const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
-        for(const j in this.jugadorEquipo){ 
-          puntosPorJugador[j]=0; 
-          palosPorJugador[j]=0; 
-          acesPorJugador[j]=0; 
-          scratchesPorJugador[j]=0; 
-        }
-        for(const e in this.equipos){ 
-          puntosEquipo[e]=0; 
-        }
-
-        let preguntaActual=null;
-        for(const linea of contenidoHastaAqui.split('\n')){
-          const pl = plain(linea);
-          
-          const mQ=pl.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/i);
-          if(mQ){ 
-            preguntaActual=parseInt(mQ[1],10); 
-          }
-          
-          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
-
-          // Detectar con >>> o >> (para compatibilidad)
-          const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
-          const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
-          const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
-          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>{2,3}(\S+)/i);
-
-          let jugador=null;
-          if(mScratch || mAce || mAcierto){
-            jugador=(mScratch&&mScratch[1])||(mAce&&mAce[1])||(mAcierto&&mAcierto[1]);
-            if(jugador && puntosPorJugador[jugador]!==undefined){
-              puntosPorJugador[jugador]++;
-              if(mScratch) scratchesPorJugador[jugador]++;
-              if(mAce){ 
-                acesPorJugador[jugador]++; 
-                scratchesPorJugador[jugador]++; 
-              }
-              const eq=this.jugadorEquipo[jugador];
-              if(eq){ 
-                puntosEquipo[eq]++; 
-              }
-            }
-          }else if(mPalo){
-            jugador=mPalo[1]; 
-            if(jugador && palosPorJugador[jugador]!==undefined) {
-              palosPorJugador[jugador]++;
-            }
-          }
-        }
-
-        return { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador };
-      }
-                nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                nuevas.push(`📈 Parcial de la pregunta: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
-              });
-            }
-
-            if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
-              const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
-              if(orden.length>=2){
-                const diff = Math.abs(orden[0][1]-orden[1][1]);
-                if(diff<=10){
-                  const marcador = orden.map(([eq,pts])=>`${eq} ${pts}`).join(' | ');
-                  nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-                  nuevas.push(`⏱️ Marcador tras P${currentQ}: ${marcador} (dif ${diff})`);
-                }
-              }
-            }
-
-            if(this.recordsGlobales.racha &&
-               this.recordsGlobales.racha.qCorte === currentQ){
-              const {len,jugador}=this.recordsGlobales.racha;
-              nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
-              nuevas.push(`🔥 Racha interrumpida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
-            }
-
-            currentQ=null;
-          }
-        }
-        return nuevas.join('\n');
-      }
-
-      contarPuntosAcumulativos(contenidoHastaAqui){
-        const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
-        for(const j in this.jugadorEquipo){ 
-          puntosPorJugador[j]=0; 
-          palosPorJugador[j]=0; 
-          acesPorJugador[j]=0; 
-          scratchesPorJugador[j]=0; 
-        }
-        for(const e in this.equipos){ 
-          puntosEquipo[e]=0; 
-        }
-
-        let preguntaActual=null;
-        for(const linea of contenidoHastaAqui.split('\n')){
-          const pl = plain(linea);
-          
-          const mQ=pl.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/i);
-          if(mQ){ 
-            preguntaActual=parseInt(mQ[1],10); 
-          }
-          
-          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
-
-          const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-          const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-          const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
-          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/i);
-
-          let jugador=null;
-          if(mScratch || mAce || mAcierto){
-            jugador=(mScratch&&mScratch[1])||(mAce&&mAce[1])||(mAcierto&&mAcierto[1]);
-            if(jugador && puntosPorJugador[jugador]!==undefined){
-              puntosPorJugador[jugador]++;
-              if(mScratch) scratchesPorJugador[jugador]++;
-              if(mAce){ 
-                acesPorJugador[jugador]++; 
-                scratchesPorJugador[jugador]++; 
-              }
-              const eq=this.jugadorEquipo[jugador];
-              if(eq){ 
-                puntosEquipo[eq]++; 
-              }
-            }
-          }else if(mPalo){
-            jugador=mPalo[1]; 
-            if(jugador && palosPorJugador[jugador]!==undefined) {
-              palosPorJugador[jugador]++;
-            }
-          }
-        }
-
-        return { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador };
-      }
-
-      obtenerEstadisticasEquipos(){
-        const stats={};
-        for(const eq in this.equipos){
-          const lista=this.equipos[eq];
-          const aus=lista.filter(j=>!this.jugadoresActivos.has(j));
-          const pre=lista.filter(j=>this.jugadoresActivos.has(j));
-          stats[eq]={ 
-            total:lista.length, 
-            presentes:pre.length, 
-            ausentes:aus.length, 
-            listaAusentes:aus 
-          };
-        }
-        return stats;
-      }
-
-      generarResumen(contenidoHastaAqui, esPrimera, esUltima){
-        let extras=[];
-        const { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador } =
-          this.contarPuntosAcumulativos(contenidoHastaAqui);
-
         extras.push('\n\n═══════════════════════════════════════════');
         extras.push('           📊 DATOS EXTRA DEL CORTE');
         extras.push('═══════════════════════════════════════════\n');
-
-        if(esPrimera){
+        
+        if(esPrimera) {
           extras.push('🏆 EQUIPOS PARTICIPANTES:');
-          const st=this.obtenerEstadisticasEquipos();
-          for(const eq in this.equipos){
-            const s=st[eq];
-            extras.push(`${eq}: ${this.equipos[eq].join(', ')} (${s.total}/10 en plantilla)`);
-          }
-          extras.push('\n⚠️ AUSENCIAS POR EQUIPO:');
-          let hay=false;
-          for(const eq in st){
-            if(st[eq].ausentes>0){ 
-              extras.push(`${eq}: ${st[eq].listaAusentes.join(', ')} (${st[eq].ausentes} ausencias)`); 
-              hay=true; 
-            }
-          }
-          if(!hay) extras.push('No hay ausencias - todos los jugadores participan');
-
-          extras.push('\n📋 JUGADORES DISPONIBLES:');
-          const disponibles=[]; 
-          for(const eq in st){ 
-            disponibles.push(`${st[eq].presentes} ${eq}`); 
-          }
-          extras.push(disponibles.join(' vs '));
-          extras.push('');
-        }
-
-        const titulo=esUltima?'🏁 MARCADOR FINAL:':'📈 MARCADOR EN EL CORTE:';
-        extras.push(titulo);
-        for(const eq in puntosEquipo) {
-          extras.push(`${eq}: ${puntosEquipo[eq]} puntos`);
-        }
-
-        if(!esUltima){
-          extras.push('\n⭐ LUCHA POR EL MVP:');
-          const top=Object.entries(puntosPorJugador)
-            .filter(([_,p])=>p>0)
-            .sort((a,b)=>b[1]-a[1])
-            .slice(0,4);
-          if(top.length){
-            top.forEach(([j,p],i)=>{ 
-              const em=i===0?'🥇':i===1?'🥈':i===2?'🥉':'🏅'; 
-              extras.push(`${em} ${j}: ${p} puntos`); 
-            });
-          }else {
-            extras.push('Aún no hay puntuaciones registradas');
+          for(const eq in this.equipos) {
+            extras.push(`${eq}: ${this.equipos[eq].join(', ')}`);
           }
         }
-
-        if (esUltima && this.recordsGlobales) {
-          const rg = this.recordsGlobales;
-          extras.push('\n📊 ESTADÍSTICAS DE PREGUNTAS:');
-
-          if (rg.dificultad) {
-            extras.push(
-              `🐢 Pregunta con mayor dificultad: P${rg.dificultad.q} ` +
-              `(el bot no dio el primer acertante hasta pasados ${rg.dificultad.tiempo} segundos)`
-            );
-          }
-
-          if (rg.parciales && rg.parciales.length) {
-            const desc = rg.parciales
-              .map(b => `P${b.q} (${b.ganador} +${b.brecha})`)
-              .join(', ');
-            extras.push(`📈 Parcial más favorable: ${desc}`);
-          }
-
-          if (rg.racha) {
-            extras.push(
-              `🔥 Racha interrumpida: ${rg.racha.jugador} ` +
-              `llevaba ${rg.racha.len} seguidas y se cortó en P${rg.racha.qCorte}`
-            );
-          }
-        }
-
-        if(esUltima){
-          extras.push('\n🥇 CLASIFICACIÓN INDIVIDUAL FINAL:');
-          Object.entries(puntosPorJugador)
-            .filter(([_,p])=>p>0)
-            .sort((a,b)=>b[1]-a[1])
-            .forEach(([j,p])=>{
-              const palos=palosPorJugador[j]||0;
-              const aces=acesPorJugador[j]||0;
-              const scratches=scratchesPorJugador[j]||0;
-              const det=[`${p} puntos`];
-              if(scratches>0) det.push(`${scratches} scratches`);
-              if(aces>0) det.push(`${aces} aces`);
-              if(palos>0) det.push(`${palos} palos`);
-              extras.push(`${j}: ${det.join(', ')}`);
-            });
-
-          extras.push('\n🏆 CLASIFICACIÓN POR EQUIPOS FINAL:');
-          const eStats={};
-          for(const eq in this.equipos){ 
-            eStats[eq]={ 
-              puntos:puntosEquipo[eq]||0, 
-              scratches:0, 
-              aces:0, 
-              palos:0 
-            }; 
-          }
-          for(const j in this.jugadorEquipo){
-            const eq=this.jugadorEquipo[j];
-            if(eStats[eq]){
-              eStats[eq].scratches += (scratchesPorJugador[j]||0);
-              eStats[eq].aces      += (acesPorJugador[j]||0);
-              eStats[eq].palos     += (palosPorJugador[j]||0);
-            }
-          }
-          Object.entries(eStats)
-            .sort((a,b)=>b[1].puntos-a[1].puntos)
-            .forEach(([eq,s])=>{
-              const det=[`${s.puntos} puntos`];
-              if(s.scratches>0) det.push(`${s.scratches} scratches`);
-              if(s.aces>0) det.push(`${s.aces} aces`);
-              if(s.palos>0) det.push(`${s.palos} palos`);
-              extras.push(`${eq}: ${det.join(', ')}`);
-            });
-        }
-
+        
         extras.push('\n═══════════════════════════════════════════\n');
         return extras.join('\n');
       }
     }
 
-    // Limpieza IRC básica
-    function limpiarLinea(linea){
+    // Funciones de limpieza básica
+    function limpiarLinea(linea) {
       return linea
-        .replace(/\x03\d{0,2}(?:,\d{1,2})?/g,"")
-        .replace(/[\x02\x1D\x1F\x0F\x16\x7F]/g,"")
-        .replace(/\b\d{1,2},\d{1,2}\b/g,"")
-        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g,"")
-        .replace(/\s{2,}/g," ")
-        .replace(/^[:\?]\s*/,"")
+        .replace(/\x03\d{0,2}(?:,\d{1,2})?/g, "")
+        .replace(/[\x02\x1D\x1F\x0F\x16\x7F]/g, "")
+        .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
+        .replace(/\s{2,}/g, " ")
         .trim();
     }
     
-    function limpiarArchivo(contenido){ 
-      return contenido.split("\n").map(limpiarLinea).join("\n"); 
+    function limpiarArchivo(contenido) {
+      return contenido.split("\n").map(limpiarLinea).join("\n");
     }
 
-    // Detección de preguntas para cortar
-    function encontrarPosicionesPreguntas(contenido){
-      const pos=[];
-      contenido.split("\n").forEach((l,i)=>{
-        const pl = plain(l);
-        // Patrón mejorado que detecta el formato del log correctamente
+    // Buscar posiciones de preguntas
+    function encontrarPosicionesPreguntas(contenido) {
+      const pos = [];
+      const lineas = contenido.split("\n");
+      
+      for(let i = 0; i < lineas.length; i++) {
+        const pl = plain(lineas[i]);
         if(/Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl)) {
           pos.push(i);
         }
-      });
-      console.log(`Encontradas ${pos.length} preguntas en las posiciones:`, pos.slice(0,10));
+      }
+      
       return pos;
     }
 
-    function dividirArchivo(contenido,numPartes=4){
-      const lineas=contenido.split("\n");
-      const posiciones=encontrarPosicionesPreguntas(contenido);
+    // Dividir archivo
+    function dividirArchivo(contenido, numPartes) {
+      const lineas = contenido.split("\n");
+      const posiciones = encontrarPosicionesPreguntas(contenido);
       
       if(!posiciones.length) {
         throw new Error("No se encontraron preguntas en el archivo");
       }
       
-      const total=lineas.length;
-      const porParte=Math.floor(total/numPartes);
-      const cortes=[]; 
-      let ultimo=0;
+      const total = lineas.length;
+      const porParte = Math.floor(total / numPartes);
+      const cortes = [];
+      let ultimo = 0;
       
-      for(let i=1;i<numPartes;i++){
-        const objetivo=i*porParte; 
-        let mejor=ultimo;
-        for(const p of posiciones){ 
-          if(p<=objetivo && p>ultimo) mejor=p; 
+      for(let i = 1; i < numPartes; i++) {
+        const objetivo = i * porParte;
+        let mejor = ultimo;
+        
+        for(const p of posiciones) {
+          if(p <= objetivo && p > ultimo) {
+            mejor = p;
+          }
         }
-        if(mejor>ultimo){ 
-          cortes.push(mejor); 
-          ultimo=mejor; 
+        
+        if(mejor > ultimo) {
+          cortes.push(mejor);
+          ultimo = mejor;
         }
       }
       
-      const partes=[]; 
-      let inicio=0; 
-      const finales=cortes.concat([total]);
+      const partes = [];
+      let inicio = 0;
+      const finales = [...cortes, total];
       
-      finales.forEach((fin,idx)=>{
-        const fragmento=lineas.slice(inicio,fin).join("\n");
+      finales.forEach((fin, idx) => {
+        const fragmento = lineas.slice(inicio, fin).join("\n");
         partes.push({
-          nombre:`parte_${String(idx+1).padStart(2,'0')}.txt`, 
-          contenido:fragmento, 
-          lineas:fin-inicio
+          nombre: `parte_${String(idx + 1).padStart(2, '0')}.txt`,
+          contenido: fragmento,
+          lineas: fin - inicio
         });
-        inicio=fin;
+        inicio = fin;
       });
       
-      console.log(`Archivo dividido en ${partes.length} partes`);
       return partes;
     }
 
-    function handleFile(file){
-      if(!file.name.match(/\.(txt|log)$/i)){ 
-        showMessage('Por favor selecciona un archivo .txt o .log','error'); 
-        return; 
+    // Manejar archivo
+    function handleFile(file) {
+      if(!file.name.match(/\.(txt|log)$/i)) {
+        showMessage('Por favor selecciona un archivo .txt o .log', 'error');
+        return;
       }
-      selectedFile=file; 
-      uploadText.textContent=`📎 ${file.name}`;
-      uploadArea.classList.add('file-selected'); 
-      processBtn.style.display='block';
-      showMessage('Archivo cargado correctamente: '+file.name,'success');
+      
+      selectedFile = file;
+      uploadText.textContent = `📎 ${file.name}`;
+      uploadArea.classList.add('file-selected');
+      processBtn.style.display = 'block';
+      showMessage('Archivo cargado correctamente: ' + file.name, 'success');
     }
 
-    function processLog(){
-      if(!selectedFile){ 
-        showMessage("Selecciona un archivo primero",'error'); 
-        return; 
+    // Procesar log
+    function processLog() {
+      if(!selectedFile) {
+        showMessage("Selecciona un archivo primero", 'error');
+        return;
       }
       
-      const numPartes=parseInt(document.getElementById('numPartes').value)||4;
-      const cleanIRC=document.getElementById('cleanIRC').checked;
-      const cleanMax=document.getElementById('cleanMax').checked;
-      const addExtras=document.getElementById('addExtras').checked;
+      const numPartes = parseInt(document.getElementById('numPartes').value) || 4;
+      const cleanIRC = document.getElementById('cleanIRC').checked;
+      const cleanMax = document.getElementById('cleanMax').checked;
+      const addExtras = document.getElementById('addExtras').checked;
       
-      showMessage('Procesando archivo...','success');
-
-      const reader=new FileReader();
-      reader.onload=(e)=>{
-        try{
-          const original = e.target.result;
-          console.log(`Archivo leído: ${original.length} caracteres`);
-
-          // Fuente para ANÁLISIS (mantiene timestamps si el usuario no limpia)
-          let fuenteAnalisis = cleanIRC ? limpiarArchivo(original) : original;
-
-          let analizador=null;
-          let anotado = fuenteAnalisis;
-
-          if(addExtras){
-            analizador=new AnalizadorPartida();
-            analizador.identificarBot(fuenteAnalisis);
-            analizador.procesarEquipos(fuenteAnalisis);
-            analizador.precomputarRecordsGlobales(fuenteAnalisis);
-            anotado=analizador.anotarDatosEnLinea(fuenteAnalisis);
+      showMessage('Procesando archivo...', 'success');
+      
+      const reader = new FileReader();
+      
+      reader.onload = function(e) {
+        try {
+          let contenido = e.target.result;
+          
+          if(cleanIRC) {
+            contenido = limpiarArchivo(contenido);
           }
-
-          // Fuente para SALIDA: aplicar limpieza máxima si procede
-          let contenidoSalida = cleanMax ? limpiarArchivoMax(anotado) : anotado;
-
-          const partes=dividirArchivo(contenidoSalida, numPartes);
-
-          if(addExtras && analizador){
-            let acumulado='';
-            partes.forEach((parte,idx)=>{
+          
+          let analizador = null;
+          if(addExtras) {
+            analizador = new AnalizadorPartida();
+            analizador.identificarBot(contenido);
+            analizador.procesarEquipos(contenido);
+          }
+          
+          if(cleanMax) {
+            contenido = limpiarArchivoMax(contenido);
+          }
+          
+          const partes = dividirArchivo(contenido, numPartes);
+          
+          if(addExtras && analizador) {
+            let acumulado = '';
+            partes.forEach((parte, idx) => {
               acumulado += parte.contenido;
-              const esPrimera = idx===0;
-              const esUltima = idx===partes.length-1;
+              const esPrimera = (idx === 0);
+              const esUltima = (idx === partes.length - 1);
               const extras = analizador.generarResumen(acumulado, esPrimera, esUltima);
               parte.contenido += extras;
             });
           }
-
-          mostrarResultados(partes,numPartes);
-        }catch(err){ 
-          console.error('Error procesando:', err);
-          showMessage("Error: "+err.message,'error'); 
+          
+          mostrarResultados(partes, numPartes);
+          
+        } catch(err) {
+          console.error('Error:', err);
+          showMessage("Error: " + err.message, 'error');
         }
       };
-      reader.onerror=()=>showMessage('Error al leer el archivo','error');
-      reader.readAsText(selectedFile,'utf-8');
+      
+      reader.onerror = function() {
+        showMessage('Error al leer el archivo', 'error');
+      };
+      
+      reader.readAsText(selectedFile, 'utf-8');
     }
 
-    function mostrarResultados(partes,numPartes){
+    // Mostrar resultados
+    function mostrarResultados(partes, numPartes) {
       results.innerHTML = `<h3>📦 Archivos Generados (${numPartes} partes)</h3>`;
-
-      partes.forEach(parte=>{
+      
+      partes.forEach(parte => {
         const fileItem = document.createElement('div');
         fileItem.className = 'file-item';
-
+        
         const info = document.createElement('div');
         info.innerHTML = `<strong>${parte.nombre}</strong><br>${parte.lineas} líneas | ${formatFileSize(parte.contenido.length)}`;
-
+        
         const btn = document.createElement('button');
         btn.className = 'download-btn';
         btn.textContent = 'Descargar';
         btn.onclick = () => descargarParte(parte.nombre, parte.contenido);
-
+        
         fileItem.appendChild(info);
         fileItem.appendChild(btn);
         results.appendChild(fileItem);
       });
-
-      if (partes.length > 1) {
+      
+      if(partes.length > 1) {
         const btnZip = document.createElement('button');
         btnZip.className = 'button success';
         btnZip.textContent = '📦 Descargar todas en ZIP';
         btnZip.onclick = () => descargarZip(partes);
         results.appendChild(btnZip);
       }
-
+      
       results.classList.add('show');
       showMessage(`Log procesado correctamente en ${numPartes} partes`, 'success');
     }
 
-    function descargarParte(nombre,contenido){
-      const blob=new Blob([contenido],{type:"text/plain;charset=utf-8"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a');
-      a.href=url;
-      a.download=nombre;
+    // Descargar parte
+    function descargarParte(nombre, contenido) {
+      const blob = new Blob([contenido], {type: "text/plain;charset=utf-8"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = nombre;
       a.click();
       URL.revokeObjectURL(url);
     }
 
-    async function descargarZip(partes){
-      try{
-        showMessage('Generando archivo ZIP...','success');
-        const zip=new JSZip();
-        partes.forEach(p=>zip.file(p.nombre,p.contenido));
-        const blob=await zip.generateAsync({type:"blob"});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement('a');
-        a.href=url;
-        a.download="partes_trivial.zip";
+    // Descargar ZIP
+    async function descargarZip(partes) {
+      try {
+        showMessage('Generando archivo ZIP...', 'success');
+        const zip = new JSZip();
+        
+        partes.forEach(p => {
+          zip.file(p.nombre, p.contenido);
+        });
+        
+        const blob = await zip.generateAsync({type: "blob"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "partes_trivial.zip";
         a.click();
         URL.revokeObjectURL(url);
-        showMessage('ZIP descargado correctamente','success');
-      }catch(e){
-        showMessage('Error al generar el archivo ZIP','error');
+        
+        showMessage('ZIP descargado correctamente', 'success');
+      } catch(e) {
+        showMessage('Error al generar el archivo ZIP', 'error');
       }
     }
 
-    function formatFileSize(bytes){
-      if(bytes<1024) return bytes+' bytes';
-      if(bytes<1048576) return Math.round(bytes/1024)+' KB';
-      return Math.round(bytes/1048576)+' MB';
+    // Formatear tamaño
+    function formatFileSize(bytes) {
+      if(bytes < 1024) return bytes + ' bytes';
+      if(bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+      return Math.round(bytes / 1048576) + ' MB';
     }
 
-    function showMessage(msg,type){
-      const div=document.createElement('div');
-      div.className=`message ${type}`;
-      div.textContent=msg;
+    // Mostrar mensaje
+    function showMessage(msg, type) {
+      const div = document.createElement('div');
+      div.className = `message ${type}`;
+      div.textContent = msg;
       messages.appendChild(div);
-      setTimeout(()=>{ 
-        if(div.parentNode){ 
-          div.parentNode.removeChild(div); 
-        } 
-      },5000);
+      
+      setTimeout(() => {
+        if(div.parentNode) {
+          div.parentNode.removeChild(div);
+        }
+      }, 5000);
     }
   </script>
 </body>
