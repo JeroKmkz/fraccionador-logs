@@ -613,11 +613,18 @@
     function limpiarArchivo(contenido){ return contenido.split("\n").map(limpiarLinea).join("\n"); }
 
     function encontrarPosicionesPreguntas(contenido){
-      const pos=[]; contenido.split("\n").forEach((l,i)=>{
-        if(/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(plain(l))) pos.push(i);
-      });
-      return pos;
-    }
+  const pos = [];
+  const lineas = contenido.split("\n");
+  // Patrón más laxo: detecta "Pregunta: N / D" aunque no haya "Base Datos Preguntas:"
+  const rePregunta = /Pregunta:\s*\d+\s*\/\s*\d+/i;
+
+  lineas.forEach((l, i) => {
+    const pl = plain(l);              // normaliza códigos IRC
+    if (rePregunta.test(pl)) pos.push(i);
+  });
+
+  return pos;
+}
 
     function dividirArchivo(contenido,numPartes=4){
       const lineas=contenido.split("\n");
