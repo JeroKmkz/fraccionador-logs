@@ -70,7 +70,7 @@
           <input type="checkbox" id="cleanMax" checked/>
           <label for="cleanMax">Limpieza máxima (compactar para crónica)</label>
         </div>
-        <small>Quita timestamps, ránkings intermedios del <em>bot</em> (equipos/individuales), “Respuestas acertadas”, “Base Datos Preguntas: …” (solo el fragmento), “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”. Comprime `>>>` → `>>`.</small>
+        <small>Quita timestamps, ránkings intermedios del <em>bot</em>, “Respuestas acertadas”, “Base Datos Preguntas: …” (solo el fragmento), “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”. Comprime `>>>` → `>>`.</small>
       </div>
 
       <div class="extras-section">
@@ -161,6 +161,15 @@
       // ránking individual con puntito: "4 ·CLYDE82–DANI_1026–…"
       const rxRankingIndivDot = /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/;
 
+      // finales individuales: SCRATCHES / PALOS / ACES
+      const rxFinalIndiv = /^(?:<[^>]+>|\S+>)\s*(SCRATCHES|PALOS|ACES)\b/i;
+
+      // encabezado estadísticas de temas
+      const rxStatsHeader = /Estadística\s+de\s+temas/i;
+
+      // línea de temas tipo "DEPORTE-3 CIENCIA-2 …"
+      const rxStatsLine = /^(?:<[^>]+>|\S+>)\s*(?:[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ\-]*-\d+)(?:\s+[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ\-]*-\d+)+$/i;
+
       for(let i=0;i<lineas.length;i++){
         let line = lineas[i];
         const pl = plain(line);
@@ -176,9 +185,18 @@
         if(isBotLine && /Puntuación\s+de\s+equipos/i.test(plNoTs)) continue;
         if(isBotLine && /Respuestas\s+acertadas/i.test(plNoTs)) continue;
 
-        // ránkings sueltos SOLO si los emite el bot
+        // ránkings sueltos SOLO bot
         if(isBotLine && rxRankingEquiposLoose.test(plNoTs)) continue;
         if(isBotLine && rxRankingIndivDot.test(plNoTs)) continue;
+
+        // finales individuales SCRATCHES/PALOS/ACES SOLO bot
+        if(isBotLine && rxFinalIndiv.test(plNoTs)) continue;
+
+        // encabezado estadísticas de temas SOLO bot
+        if(isBotLine && rxStatsHeader.test(plNoTs)) continue;
+
+        // líneas de temas SOLO bot
+        if(isBotLine && rxStatsLine.test(plNoTs)) continue;
 
         // cortar el fragmento "Base Datos Preguntas: …" (mantener el resto de la línea)
         if(/Base\s*Datos\s*Preguntas:/i.test(plNoTs)){
@@ -199,7 +217,7 @@
         // quitar '<' inicial del nick
         line = line.replace(/^<([^>]+)>/, "$1>");
 
-        // micro-ruido muy corto (no afecta a líneas útiles)
+        // micro-ruido muy corto
         const short = plain(line).trim().toLowerCase();
         if(short.length <= 6 && /^(j+a+|j+e+|lo+l+|uy+|uff+)$/.test(short)) continue;
 
