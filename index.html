@@ -436,9 +436,10 @@
           }
 
           if(this.botNick && pl.includes(`<${this.botNick}>`)){
-            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+            // Detectar con >>> o >> (para compatibilidad)
+            const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
+            const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
+            const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
             const nick = (mScratch&&mScratch[1]) || (mAce&&mAce[1]) || (mAcierto&&mAcierto[1]) || null;
             if(nick){
               const eq=this.jugadorEquipo[nick];
@@ -460,6 +461,90 @@
             if(parcialesQs.has(currentQ)){
               const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
               ocurrencias.forEach(({ganador,brecha})=>{
+                nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
+                nuevas.push(`📈 Parcial de la pregunta: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
+              });
+            }
+
+            if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
+              const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
+              if(orden.length>=2){
+                const diff = Math.abs(orden[0][1]-orden[1][1]);
+                if(diff<=10){
+                  const marcador = orden.map(([eq,pts])=>`${eq} ${pts}`).join(' | ');
+                  nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
+                  nuevas.push(`⏱️ Marcador tras P${currentQ}: ${marcador} (dif ${diff})`);
+                }
+              }
+            }
+
+            if(this.recordsGlobales.racha &&
+               this.recordsGlobales.racha.qCorte === currentQ){
+              const {len,jugador}=this.recordsGlobales.racha;
+              nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
+              nuevas.push(`🔥 Racha interrumpida: ${jugador} acumulaba ${len} preguntas seguidas con acierto y se cortó en P${currentQ}.`);
+            }
+
+            currentQ=null;
+          }
+        }
+        return nuevas.join('\n');
+      }
+
+      contarPuntosAcumulativos(contenidoHastaAqui){
+        const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
+        for(const j in this.jugadorEquipo){ 
+          puntosPorJugador[j]=0; 
+          palosPorJugador[j]=0; 
+          acesPorJugador[j]=0; 
+          scratchesPorJugador[j]=0; 
+        }
+        for(const e in this.equipos){ 
+          puntosEquipo[e]=0; 
+        }
+
+        let preguntaActual=null;
+        for(const linea of contenidoHastaAqui.split('\n')){
+          const pl = plain(linea);
+          
+          const mQ=pl.match(/Pregunta:\s*(\d+)\s*\/\s*\d+/i);
+          if(mQ){ 
+            preguntaActual=parseInt(mQ[1],10); 
+          }
+          
+          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
+
+          // Detectar con >>> o >> (para compatibilidad)
+          const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
+          const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
+          const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
+          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>{2,3}(\S+)/i);
+
+          let jugador=null;
+          if(mScratch || mAce || mAcierto){
+            jugador=(mScratch&&mScratch[1])||(mAce&&mAce[1])||(mAcierto&&mAcierto[1]);
+            if(jugador && puntosPorJugador[jugador]!==undefined){
+              puntosPorJugador[jugador]++;
+              if(mScratch) scratchesPorJugador[jugador]++;
+              if(mAce){ 
+                acesPorJugador[jugador]++; 
+                scratchesPorJugador[jugador]++; 
+              }
+              const eq=this.jugadorEquipo[jugador];
+              if(eq){ 
+                puntosEquipo[eq]++; 
+              }
+            }
+          }else if(mPalo){
+            jugador=mPalo[1]; 
+            if(jugador && palosPorJugador[jugador]!==undefined) {
+              palosPorJugador[jugador]++;
+            }
+          }
+        }
+
+        return { puntosPorJugador,puntosEquipo,palosPorJugador,acesPorJugador,scratchesPorJugador };
+      }
                 nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
                 nuevas.push(`📈 Parcial de la pregunta: P${currentQ}. ${ganador} +${brecha} frente a sus rivales en esta pregunta.`);
               });
