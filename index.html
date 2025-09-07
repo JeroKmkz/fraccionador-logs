@@ -70,7 +70,7 @@
           <input type="checkbox" id="cleanMax" checked/>
           <label for="cleanMax">Limpieza máxima (compactar para crónica)</label>
         </div>
-        <small>Quita timestamps, ránkings intermedios del bot, “Respuestas acertadas”, “Base Datos Preguntas: …” (solo el fragmento), “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”. Comprime `>>>` → `>>`.</small>
+        <small>Quita timestamps, títulos de ránkings del bot, líneas “n ·NICKS…”, líneas “1º/2º … EQUIPO”, “Base Datos Preguntas: …” (solo el fragmento), “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”. Comprime `>>>` → `>>`.</small>
       </div>
 
       <div class="extras-section">
@@ -120,7 +120,6 @@
     }
     function plain(line){ return stripIrcCodes(line || ""); }
 
-    // Nick al inicio de línea
     function nickFromLine(pl){
       let m = pl.match(/^<([^>]+)>/);
       if(m) return m[1];
@@ -129,7 +128,6 @@
       return null;
     }
 
-    // Detectar nick del bot si no viene dado
     function detectarBotNick(contenido){
       for(const linea of contenido.split('\n')){
         const pl = plain(linea);
@@ -152,75 +150,47 @@
       return { q, total };
     }
 
-    // ---------- Limpieza máxima (compactar salida para crónica) ----------
+    // ---------- Limpieza máxima (SOLO por línea, SOLO si es el bot) ----------
     function limpiarArchivoMax(contenido, botNickParam){
       const botNick = botNickParam || detectarBotNick(contenido);
       const lineas = contenido.split('\n');
       const out = [];
-      let skipScore = false;    // bloque "Puntuación de equipos" (bot)
-      let skipAciertos = false; // bloque "Respuestas acertadas" (bot)
 
-      const rxRankingEquiposLoose =
-        /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*(?:º|o)\s+\d{1,4}\s+[A-Z0-9@ÁÉÍÓÚÑ\-]+$/;
+      // patrones de descarte por línea (bot)
+      const rxTituloRanks = /(Puntuación\s+de\s+equipos|Respuestas\s+acertadas)/i;
+      const rxRankingIndivDot = /^\s*(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/; // "9 ·NICK–NICK–"
+      const rxRankingEquipoPos = /^\s*(?:<[^>]+>|\S+>)\s*\d{1,3}\s*(?:º|o)\s+\d{1,4}\b.*$/; // "1º 31 LIDERES"
 
-      const rxRankingIndivDot =
-        /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/;
-
-      const shouldStopSkip = (pl) => (
-        parsePregunta(pl) ||
-        /La(s)?\s+buena(s)?:/i.test(pl) ||
-        /---/.test(pl) ||
-        />{2,3}\S+/.test(pl)
-      );
-
-      for(let i=0;i<lineas.length;i++){
-        let line = lineas[i];
+      for(let line of lineas){
         const pl = plain(line);
         const nick = nickFromLine(pl);
-        const isBotLine = !!(botNick && nick && nick.toLowerCase() === botNick.toLowerCase());
+        const isBotLine = !!(botNick && nick && nick.toLowerCase()===botNick.toLowerCase());
 
-        // Bloques activos: si llega una línea de jugador, cierro el skip y proceso
-        if(skipScore){
-          if(!isBotLine){ skipScore=false; /* caigo a procesar la línea */ }
-          else if(shouldStopSkip(pl)){ skipScore=false; }
-          else { continue; }
-        }
-        if(skipAciertos){
-          if(!isBotLine){ skipAciertos=false; }
-          else if(shouldStopSkip(pl)){ skipAciertos=false; }
-          else { continue; }
+        // Quitar SOLO si es el bot
+        if(isBotLine){
+          if(rxTituloRanks.test(pl)) continue;
+          if(rxRankingIndivDot.test(pl)) continue;
+          if(rxRankingEquipoPos.test(pl)) continue;
         }
 
-        // Encabezados de bloques a omitir (SOLO si es bot)
-        if(isBotLine && /Puntuación\s+de\s+equipos/i.test(pl)){ skipScore=true; continue; }
-        if(isBotLine && /Respuestas\s+acertadas/i.test(pl)){ skipAciertos=true; continue; }
-
-        // RÁNKINGS SUELTOS (SOLO si es bot)
-        if(isBotLine && rxRankingEquiposLoose.test(pl)) continue;
-        if(isBotLine && rxRankingIndivDot.test(pl)) continue;
-
-        // “Base Datos Preguntas:” → eliminar SOLO el fragmento, no la línea
+        // Base Datos Preguntas → recortar fragmento
         if(/Base\s*Datos\s*Preguntas:/i.test(pl)){
           line = line.replace(/\s*Base\s*Datos\s*Preguntas:.*$/i, "");
         }
 
-        // “Mandada por: …” (mantener la solución y cortar el resto) — suele ser del bot
+        // “Mandada por:” después de La(s) buena(s):
         if(/La(s)?\s+buena(s)?:/i.test(pl)){
           line = line.replace(/(\bLa(?:s)?\s+buena(?:s)?:[^]*?)(\s+Mandada\s+por:.*)$/i, "$1");
         }
 
-        // Quitar timestamps del inicio (admite 23:05:14''073)
+        // Quitar timestamps
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
         // Comprimir >>> a >>
         line = line.replace(/>>>/g, ">>");
 
-        // Quitar '<' inicial de nick → "nick>"
+        // Quitar '<' inicial de nick
         line = line.replace(/^<([^>]+)>/, "$1>");
-
-        // Filtrar micro-ruido muy corto (risas, etc.) — NO toca “vamosss” (>=7)
-        const short = pl.trim().toLowerCase();
-        if(short.length <= 6 && /^(j+a+|j+e+|lo+l+|uy+|uff+)$/.test(short)) continue;
 
         out.push(line);
       }
@@ -682,7 +652,7 @@
         try{
           const original = e.target.result;
 
-          // Fuente para ANÁLISIS (independiente de cleanMax)
+          // BASE de ANÁLISIS (independiente de limpieza máxima)
           let fuenteAnalisis = cleanIRC ? limpiarArchivo(original) : original;
 
           let analizador=null;
@@ -696,7 +666,7 @@
             anotado=analizador.anotarDatosEnLinea(fuenteAnalisis);
           }
 
-          // Fuente de SALIDA para el usuario (con botNick si lo tenemos)
+          // SALIDA para el usuario
           const botNick = analizador?.botNick || detectarBotNick(fuenteAnalisis);
           let contenidoSalida = cleanMax ? limpiarArchivoMax(anotado, botNick) : anotado;
 
@@ -705,7 +675,7 @@
           if(addExtras && analizador){
             let acumulado='';
             partes.forEach((parte,idx)=>{
-              acumulado+=parte.contenido;
+              acumulado+=parte.contenido; // contarPuntos funciona con nick> y >> también
               const esPrimera=idx===0, esUltima=idx===partes.length-1;
               const extras=analizador.generarResumen(acumulado, esPrimera, esUltima);
               parte.contenido+=extras;
