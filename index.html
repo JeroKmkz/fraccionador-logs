@@ -106,7 +106,7 @@
     fileInput.onchange=e=>{ if(e.target.files.length>0) handleFile(e.target.files[0]); };
     processBtn.onclick=()=>processLog();
 
-    // ---------- Normalización (para detección/regex) ----------
+    // ---------- Utilidades de normalización ----------
     function stripIrcCodes(s){
       if(!s) return s;
       return s
@@ -119,11 +119,12 @@
         .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g,"");
     }
     function plain(line){ return stripIrcCodes(line || ""); }
+    function stripTsStart(s){ return s.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, ""); }
 
     // ---------- Parseo robusto de "Pregunta: x / y" ----------
     function parsePregunta(pl){
-      const rx1 = /(?:^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*)?.*?\bPregunta\s*:\s*(\d{1,3})\s*[\/-]\s*(\d{1,3})/i;
-      const m = pl.match(rx1);
+      const rx = /(?:^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*)?.*?\bPregunta\s*:\s*(\d{1,3})\s*[\/-]\s*(\d{1,3})/i;
+      const m = pl.match(rx);
       if(!m) return null;
       const q = parseInt(m[1],10);
       const total = parseInt(m[2],10);
@@ -131,7 +132,7 @@
       return { q, total };
     }
 
-    // ---------- Detección del nick del bot (para limpieza selectiva) ----------
+    // ---------- Detección del nick del bot ----------
     function detectarBotNick(contenido){
       for(const linea of contenido.split('\n')){
         const pl = plain(linea);
@@ -140,66 +141,65 @@
           if(m) return m[1];
         }
       }
-      // Fallback: primer nick que anuncie "Pregunta:"
       const m2 = plain(contenido).match(/<([^>]+)>.*?\bPregunta\s*:/i);
       if(m2) return m2[1];
-      return 'Saga_Noren'; // último recurso
+      return 'Saga_Noren';
     }
 
-    // ---------- Limpieza máxima (compactar salida para crónica) ----------
+    // ---------- Limpieza máxima (compactar) ----------
     function limpiarArchivoMax(contenido){
       const bot = detectarBotNick(contenido);
       const lineas = contenido.split('\n');
       const out = [];
 
-      // Prefijo de nick: "<nick>" o "nick>"
-      const rxNickPrefix = /^(?:<([^>]+)>|(\S+)>)/;
+      // nick al comienzo (tras quitar timestamp)
+      const rxNickPrefixNoTs = /^(?:<([^>]+)>|(\S+)>)/;
 
-      // Ránking por equipos (ej: "… 1º 31 LIDERES")
-      const rxRankingEquiposLoose = /^\s*(?:<[^>]+>|\S+>)\s*\d{1,3}\s*(?:º|ª|o)\s+\d{1,4}\s+[A-Z0-9@ÁÉÍÓÚÑ\-]+$/;
+      // ránking equipos:  "1º 31 LIDERES"
+      const rxRankingEquiposLoose = /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*(?:º|ª|o)\s+\d{1,4}\s+\S+$/i;
 
-      // Ránking individual con puntito (ej: "… 4 ·CLYDE82–DANI_1026–…")
-      const rxRankingIndivDot = /^\s*(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/;
+      // ránking individual con puntito: "4 ·CLYDE82–DANI_1026–…"
+      const rxRankingIndivDot = /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/;
 
       for(let i=0;i<lineas.length;i++){
         let line = lineas[i];
         const pl = plain(line);
+        const plNoTs = stripTsStart(pl);
 
-        // ¿Quién habla?
+        // ¿quién habla? (tras quitar timestamp)
         let nick = null;
-        const mNick = pl.match(rxNickPrefix);
+        const mNick = plNoTs.match(rxNickPrefixNoTs);
         if(mNick) nick = mNick[1] || mNick[2];
-
         const isBotLine = !!nick && nick.toLowerCase() === String(bot).toLowerCase();
 
-        // Encabezados de bloques a omitir SOLO si los emite el bot
-        if(isBotLine && /Puntuación\s+de\s+equipos/i.test(pl)) continue;
-        if(isBotLine && /Respuestas\s+acertadas/i.test(pl)) continue;
+        // encabezados a omitir SOLO si los emite el bot
+        if(isBotLine && /Puntuación\s+de\s+equipos/i.test(plNoTs)) continue;
+        if(isBotLine && /Respuestas\s+acertadas/i.test(plNoTs)) continue;
 
-        // Ránkings sueltos (equipos / individuales) SOLO si los emite el bot
-        if(isBotLine && rxRankingEquiposLoose.test(pl)) continue;
-        if(isBotLine && rxRankingIndivDot.test(pl)) continue;
+        // ránkings sueltos SOLO si los emite el bot
+        if(isBotLine && rxRankingEquiposLoose.test(plNoTs)) continue;
+        if(isBotLine && rxRankingIndivDot.test(plNoTs)) continue;
 
-        // “Base Datos Preguntas:” → eliminar SOLO el fragmento, no la línea
-        if(/Base\s*Datos\s*Preguntas:/i.test(pl)){
+        // cortar el fragmento "Base Datos Preguntas: …" (mantener el resto de la línea)
+        if(/Base\s*Datos\s*Preguntas:/i.test(plNoTs)){
           line = line.replace(/\s*Base\s*Datos\s*Preguntas:.*$/i, "");
         }
 
-        // “Mandada por: …” → mantener la solución y cortar el resto
-        if(/La(s)?\s+buena(s)?:/i.test(pl)){
+        // “Mandada por: …” → mantener solución y recortar lo demás
+        if(/La(s)?\s+buena(s)?:/i.test(plNoTs)){
           line = line.replace(/(\bLa(?:s)?\s+buena(?:s)?:[^]*?)(\s+Mandada\s+por:.*)$/i, "$1");
         }
 
-        // Quitar timestamps del inicio (admite 23:05:14''073)
+        // quitar timestamp del inicio en salida
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
-        // Comprimir >>> a >>
+        // comprimir >>> a >>
         line = line.replace(/>>>/g, ">>");
 
-        // Quitar '<' inicial de nick → "nick>"
+        // quitar '<' inicial del nick
         line = line.replace(/^<([^>]+)>/, "$1>");
 
-        // Filtrar micro-ruido muy corto
+        // micro-ruido muy corto (no afecta a líneas útiles)
         const short = plain(line).trim().toLowerCase();
         if(short.length <= 6 && /^(j+a+|j+e+|lo+l+|uy+|uff+)$/.test(short)) continue;
 
@@ -261,7 +261,8 @@
         for(const linea of this.contenidoCompleto.split('\n')){
           if(this.jugadoresActivos.size===total) break;
           const pl = plain(linea);
-          const m = pl.match(/<([^>]+)>|^(\S+)>/);
+          const plNoTs = stripTsStart(pl);
+          const m = plNoTs.match(/<([^>]+)>|^(\S+)>/);
           if(!m) continue;
           const nick=(m[1]||m[2]);
           if(nick===this.botNick ||
@@ -277,7 +278,6 @@
         }
       }
 
-      // --- 1ª pasada: records globales ---
       precomputarRecordsGlobales(contenido){
         const lineas=contenido.split('\n');
         let currentQ=null, startTime=null, firstHitTime=null;
@@ -376,7 +376,6 @@
         };
       }
 
-      // --- 2ª pasada: inyección de DATO EXTRA + sprint final ---
       anotarDatosEnLinea(contenido){
         if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
 
@@ -396,7 +395,6 @@
             continue;
           }
 
-          // Conteo en vivo para sprint final
           if(this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`))){
             const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
             const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
@@ -410,18 +408,15 @@
 
           nuevas.push(linea);
 
-          // Cierre de pregunta
           if(this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`)) && currentQ!=null &&
              (/La buena:/i.test(pl) || /Las buenas:/i.test(pl))){
 
-            // Dificultad (única)
             if(this.recordsGlobales.dificultad &&
                this.recordsGlobales.dificultad.q === currentQ){
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
               nuevas.push(`🐢 Pregunta con mayor dificultad de la partida: P${currentQ}. El bot no dio el primer acertante hasta pasados ${this.recordsGlobales.dificultad.tiempo} segundos.`);
             }
 
-            // Parciales (múltiples)
             if(parcialesQs.has(currentQ)){
               const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
               ocurrencias.forEach(({ganador,brecha})=>{
@@ -430,7 +425,6 @@
               });
             }
 
-            // Sprint final (últimas 5 con dif ≤ 10)
             if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
               const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
               if(orden.length>=2){
@@ -443,7 +437,6 @@
               }
             }
 
-            // Racha interrumpida
             if(this.recordsGlobales.racha &&
                this.recordsGlobales.racha.qCorte === currentQ){
               const {len,jugador}=this.recordsGlobales.racha;
@@ -457,7 +450,6 @@
         return nuevas.join('\n');
       }
 
-      // --- Conteo acumulado para “Datos del corte” ---
       contarPuntosAcumulativos(contenidoHastaAqui){
         const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
         for(const j in this.jugadorEquipo){ puntosPorJugador[j]=0; palosPorJugador[j]=0; acesPorJugador[j]=0; scratchesPorJugador[j]=0; }
@@ -668,7 +660,7 @@
         try{
           const original = e.target.result;
 
-          // Fuente para ANÁLISIS (independiente de cleanMax)
+          // Fuente para ANÁLISIS
           let fuenteAnalisis = cleanIRC ? limpiarArchivo(original) : original;
 
           let analizador=null;
@@ -682,7 +674,7 @@
             anotado=analizador.anotarDatosEnLinea(fuenteAnalisis);
           }
 
-          // Fuente de SALIDA para el usuario
+          // Fuente de SALIDA
           let contenidoSalida = cleanMax ? limpiarArchivoMax(anotado) : anotado;
 
           const partes=dividirArchivo(contenidoSalida, numPartes);
