@@ -70,7 +70,7 @@
           <input type="checkbox" id="cleanMax" checked/>
           <label for="cleanMax">Limpieza máxima (compactar para crónica)</label>
         </div>
-        <small>Quita timestamps, marcador intermedio, “Respuestas acertadas” y “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”.</small>
+        <small>Quita timestamps, marcador intermedio, “Respuestas acertadas”, “Base Datos Preguntas: …”, “Mandada por…”. Mantiene “DATO EXTRA” y “La buena”. Opcionalmente comprime `>>>` → `>>`.</small>
       </div>
 
       <div class="extras-section">
@@ -106,79 +106,84 @@
     fileInput.onchange=e=>{ if(e.target.files.length>0) handleFile(e.target.files[0]); };
     processBtn.onclick=()=>processLog();
 
-    // -------- Normalización "sólo para detectar", sin alterar el contenido real --------
+    // ---------- Utilidades de normalización (no alteran contenido de análisis) ----------
     function stripIrcCodes(s){
       if(!s) return s;
       return s
         .replace(/\x03\d{1,2}(?:,\d{1,2})?/g,"") // mIRC colors
-        .replace(/\x02/g,"") // bold
-        .replace(/\x1D/g,"") // italics
-        .replace(/\x1F/g,"") // underline
-        .replace(/\x0F/g,"") // reset
-        .replace(/\x7F/g,"") // del
+        .replace(/\x02/g,"")   // bold
+        .replace(/\x1D/g,"")   // italics
+        .replace(/\x1F/g,"")   // underline
+        .replace(/\x0F/g,"")   // reset
+        .replace(/\x7F/g,"")   // del
         .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g,""); // ANSI
     }
     function plain(line){ return stripIrcCodes(line); }
 
-    // -------- Limpieza máxima (compactar para crónica) --------
+    // ---------- Limpieza máxima (compactar salida para crónica) ----------
     function limpiarArchivoMax(contenido){
       const lineas = contenido.split('\n');
       const out = [];
-      let skipScore = false;
-      let skipAciertos = false;
+      let skipScore = false;    // bloque "Puntuación de equipos"
+      let skipAciertos = false; // bloque "Respuestas acertadas"
+
+      const isQuestionStart = (pl) =>
+        /(?:^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*)?.*Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl);
 
       const shouldStopSkip = (pl) => (
-        /Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl) ||
-        /Base\s*Datos\s*Preguntas:/i.test(pl) ||
-        /<[^>]+>/.test(pl) ||
+        isQuestionStart(pl) ||
         /La(s)?\s+buena(s)?:/i.test(pl) ||
+        /<[^>]+>/.test(pl) ||
+        />>{2,3}\S+/.test(pl) ||
         /---/.test(pl)
       );
+
+      // Patrones de líneas de ránkings/tabla sin encabezado
+      const rxRankingLine = /^\S+>\s*(?:\d+\s*º|\d+)\s*(?:·|\s)\s*\S+/i; // ej: "Saga_Noren> 1º 121 LIDERES" o "Saga_Noren> 9 ·JERONIMO–"
+      const rxOnlyRankingNick = /^\S+>\s*\d+\s*(?:·|\s)\s*[\S–-]+/i;
 
       for(let i=0;i<lineas.length;i++){
         let line = lineas[i];
         const pl = plain(line);
 
-        // ¿estamos saltando bloque de "Puntuación de equipos"?
-        if(skipScore){
-          if(shouldStopSkip(pl)) skipScore=false;
-          else continue;
-        }
-        // ¿estamos saltando bloque de "Respuestas acertadas"?
-        if(skipAciertos){
-          if(shouldStopSkip(pl)) skipAciertos=false;
-          else continue;
-        }
+        // Saltos activos
+        if(skipScore){ if(shouldStopSkip(pl)) skipScore=false; else continue; }
+        if(skipAciertos){ if(shouldStopSkip(pl)) skipAciertos=false; else continue; }
 
-        // Inicios de bloques a omitir
-        if(/Puntuación\s+de\s+equipos/i.test(pl)){
-          skipScore = true;
-          continue;
-        }
-        if(/Respuestas\s+acertadas/i.test(pl)){
-          skipAciertos = true;
-          continue;
-        }
+        // Inicios de bloques a omitir (encabezados)
+        if(/Puntuación\s+de\s+equipos/i.test(pl)){ skipScore=true; continue; }
+        if(/Respuestas\s+acertadas/i.test(pl)){ skipAciertos=true; continue; }
 
-        // Quitar 'Mandada por: ...' en líneas de La buena/Las buenas (conserva el resto)
+        // Omitir líneas de ránking aunque no aparezca el encabezado
+        if(rxRankingLine.test(pl) || rxOnlyRankingNick.test(pl)) continue;
+
+        // Quitar 'Mandada por: ...' conservando la solución
         if(/La(s)?\s+buena(s)?:/i.test(pl)){
           line = line.replace(/(\bLa(?:s)?\s+buena(?:s)?:[^]*?)(\s+Mandada\s+por:.*)$/i, "$1");
         }
 
-        // Quitar timestamps al inicio (ej. 23:00:12''257  o  23:00:12 )
+        // Eliminar línea de "Base Datos Preguntas: ..."
+        if(/Base\s*Datos\s*Preguntas:/i.test(pl)) continue;
+
+        // Quitar timestamps al inicio (23:00:12 o 23:00:12''257)
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
-        // Quitar líneas cortas de relleno tipo "xd", "jaja", "jeje", "lol" (muy conservador)
+        // (Opcional) Comprimir >>> a >> para aciertos
+        line = line.replace(/>>>/g, ">>");
+
+        // (Opcional) Quitar '<' inicial de nick para compactar
+        line = line.replace(/^<([^>]+)>/, "$1>");
+
+        // Filtrar micro-ruido muy corto
         const short = pl.trim().toLowerCase();
-        if(short.length <= 6 && /^(x+d+|j+a+ja+|j+e+je+|lol+|lmao+|uy+|uff+)$/.test(short)){
-          continue;
-        }
+        if(short.length <= 6 && /^(x+d+|j+a+ja+|j+e+je+|lol+|lmao+|uy+|uff+)$/.test(short)) continue;
 
         out.push(line);
       }
       return out.join('\n');
     }
 
+    // ---------- Analizador ----------
     class AnalizadorPartida{
       constructor(){
         this.equipos={};
@@ -194,7 +199,8 @@
         for(const linea of contenido.split('\n')){
           const pl = plain(linea);
           if(pl.includes('--- Equipos participantes ---')){
-            const m=pl.match(/<([^>]+)>/); if(m){ this.botNick=m[1]; return; }
+            const m=pl.match(/<([^>]+)>/);
+            if(m){ this.botNick=m[1]; return; }
           }
         }
       }
@@ -206,14 +212,15 @@
           const pl = plain(linea);
           if(pl.includes('--- Equipos participantes ---')){ dentro=true; continue; }
           if(pl.includes('--- DATOS RESETEADOS ---')){ dentro=false; break; }
-          if(dentro && this.botNick && pl.includes(`<${this.botNick}>`)){
-            if(!pl.includes('>>>')){
+          if(dentro && this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`))){
+            if(!pl.includes('>>>') && !pl.includes('>>')){
               const posibles=['FOGUETES','LIDERES','KAMIKAZES','ATIPIK@S','REPESCA@S','HARDBE@TS','TELERINEZ'];
               for(const eq of posibles){ if(pl.includes(eq)){ equipoActual=eq; this.equipos[eq]=[]; break; } }
             }else if(equipoActual){
-              const m=pl.match(/>>>\s*(.+)/);
+              const m=pl.match(/>>>\s*(.+)|>>\s*(.+)/);
               if(m){
-                const jugadores=m[1].trim().split(/\s+/);
+                const blob=(m[1]||m[2]||"").trim();
+                const jugadores=blob.split(/\s+/);
                 this.equipos[equipoActual]=jugadores;
                 jugadores.forEach(j=>{ this.jugadorEquipo[j]=equipoActual; });
               }
@@ -228,22 +235,24 @@
         for(const linea of this.contenidoCompleto.split('\n')){
           if(this.jugadoresActivos.size===total) break;
           const pl = plain(linea);
-          const m=pl.match(/<([^>]+)>/); if(!m) continue;
-          const nick=m[1];
+          // Soporta "<nick>" y "nick>"
+          const m = pl.match(/<([^>]+)>|^(\S+)>/);
+          if(!m) continue;
+          const nick=(m[1]||m[2]);
           if(nick===this.botNick ||
              pl.includes('--- Equipos participantes ---') ||
-             pl.includes('>>>') ||
+             pl.includes('>>>') || pl.includes('>>') ||
              pl.includes('--- DATOS RESETEADOS ---') ||
-             pl.includes('Base Datos Preguntas:') ||
-             pl.includes('Pregunta:')) continue;
+             /Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl)) continue;
           for(const jr in this.jugadorEquipo){
-            if(nick.toLowerCase()===jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
+            if(nick && nick.toLowerCase()===jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
               this.jugadoresActivos.add(jr); break;
             }
           }
         }
       }
 
+      // --- 1ª pasada: records globales ---
       precomputarRecordsGlobales(contenido){
         const lineas=contenido.split('\n');
         let currentQ=null, startTime=null, firstHitTime=null;
@@ -253,8 +262,8 @@
         const streakActual={};
         let recordRachaCortada={len:0,jugador:null,qCorte:null};
 
-        const isBotLine = l => this.botNick && plain(l).includes(`<${this.botNick}>`);
-        const tsOf = l => { const m=plain(l).match(/^(\d{2}:\d{2}:\d{2})/); return m?m[1]:null; };
+        const isBotLine = l => this.botNick && (plain(l).includes(`<${this.botNick}>`) || plain(l).includes(`${this.botNick}>`));
+        const tsOf = l => { const m=plain(l).match(/^(\d{2}:\d{2}:\d{2})(?:''\d+)?/); return m?m[1]:null; };
         const diffSec = (a,b)=>{
           const [h1,m1,s1]=a.split(':').map(Number), [h2,m2,s2]=b.split(':').map(Number);
           let x=h1*3600+m1*60+s1, y=h2*3600+m2*60+s2; let d=y-x; if(d<0) d+=86400; return d;
@@ -306,18 +315,24 @@
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
           const pl = plain(linea);
-          const mStart=pl.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*(\d+).*Base\s*Datos\s*Preguntas:/i);
+
+          // Soporta líneas con/sin "Base Datos" y con/sin timestamp
+          let mStart = pl.match(/^(\d{2}:\d{2}:\d{2})(?:''\d+)?\s*.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+          if(!mStart){
+            const mAlt = pl.match(/Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+            if(mAlt) mStart = [null,null,mAlt[1],mAlt[2]];
+          }
           if(mStart){
             const qNum=parseInt(mStart[2],10);
             const total=parseInt(mStart[3],10);
-            iniciarPregunta(qNum, mStart[1], total);
+            iniciarPregunta(qNum, mStart[1]||null, total);
             continue;
           }
 
           if(isBotLine(linea) && currentQ!=null){
-            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+            const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
+            const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
+            const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
             let nick=null;
             if(mScratch) nick=mScratch[1];
             else if(mAce) nick=mAce[1];
@@ -345,6 +360,7 @@
         };
       }
 
+      // --- 2ª pasada: inyección de DATO EXTRA + sprint final ---
       anotarDatosEnLinea(contenido){
         if(!this.recordsGlobales) this.precomputarRecordsGlobales(contenido);
 
@@ -358,19 +374,25 @@
         for(let i=0;i<lineas.length;i++){
           const linea=lineas[i];
           const pl = plain(linea);
-          const mStart=pl.match(/^\d{2}:\d{2}:\d{2}.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+
+          let mStart = pl.match(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*.*Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+          if(!mStart){
+            const mAlt = pl.match(/Pregunta:\s*(\d+)\s*\/\s*(\d+)/i);
+            if(mAlt) mStart=[null,null,mAlt[1],mAlt[2]];
+          }
           if(mStart){
-            currentQ=parseInt(mStart[1],10);
-            const total=parseInt(mStart[2],10);
+            currentQ=parseInt(mStart[1]||mStart[2],10); // (mStart[1] es null, usamos [2])
+            const total=parseInt(mStart[2]||mStart[3],10);
             if(!this.totalPreguntas || total>this.totalPreguntas) this.totalPreguntas=total;
             nuevas.push(linea);
             continue;
           }
 
-          if(this.botNick && pl.includes(`<${this.botNick}>`)){
-            const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-            const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-            const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
+          // Conteo en vivo para sprint final
+          if(this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`))){
+            const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
+            const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
+            const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
             const nick = (mScratch&&mScratch[1]) || (mAce&&mAce[1]) || (mAcierto&&mAcierto[1]) || null;
             if(nick){
               const eq=this.jugadorEquipo[nick];
@@ -380,15 +402,18 @@
 
           nuevas.push(linea);
 
-          if(this.botNick && pl.includes(`<${this.botNick}>`) && currentQ!=null &&
+          // Cierre de pregunta
+          if(this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`)) && currentQ!=null &&
              (/La buena:/i.test(pl) || /Las buenas:/i.test(pl))){
 
+            // Dificultad (única)
             if(this.recordsGlobales.dificultad &&
                this.recordsGlobales.dificultad.q === currentQ){
               nuevas.push('*** DATO EXTRA PARA EL CRONISTA ***');
               nuevas.push(`🐢 Pregunta con mayor dificultad de la partida: P${currentQ}. El bot no dio el primer acertante hasta pasados ${this.recordsGlobales.dificultad.tiempo} segundos.`);
             }
 
+            // Parciales (múltiples)
             if(parcialesQs.has(currentQ)){
               const ocurrencias = (this.recordsGlobales.parciales||[]).filter(b=>b.q===currentQ);
               ocurrencias.forEach(({ganador,brecha})=>{
@@ -397,6 +422,7 @@
               });
             }
 
+            // Sprint final (últimas 5 con dif ≤ 10)
             if(this.totalPreguntas && currentQ >= this.totalPreguntas-4){
               const orden = Object.entries(scoreEquipo).sort((a,b)=>b[1]-a[1]);
               if(orden.length>=2){
@@ -409,6 +435,7 @@
               }
             }
 
+            // Racha interrumpida
             if(this.recordsGlobales.racha &&
                this.recordsGlobales.racha.qCorte === currentQ){
               const {len,jugador}=this.recordsGlobales.racha;
@@ -422,22 +449,21 @@
         return nuevas.join('\n');
       }
 
+      // --- Conteo acumulado para “Datos del corte” (tolerante a >> y a <BOT>/BOT>) ---
       contarPuntosAcumulativos(contenidoHastaAqui){
         const puntosPorJugador={}, puntosEquipo={}, palosPorJugador={}, acesPorJugador={}, scratchesPorJugador={};
         for(const j in this.jugadorEquipo){ puntosPorJugador[j]=0; palosPorJugador[j]=0; acesPorJugador[j]=0; scratchesPorJugador[j]=0; }
         for(const e in this.equipos){ puntosEquipo[e]=0; }
 
-        let preguntaActual=null;
         for(const linea of contenidoHastaAqui.split('\n')){
           const pl = plain(linea);
-          const mQ=pl.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
-          if(mQ){ preguntaActual=parseInt(mQ[2],10); }
-          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
+          const isBot = this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`));
+          if(!isBot) continue;
 
-          const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
-          const mAce    =pl.match(/>>>(\S+)\s+acea/i);
-          const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
-          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>>>(\S+)/i);
+          const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
+          const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
+          const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
+          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>>{2,3}(\S+)/i);
 
           let jugador=null;
           if(mScratch || mAce || mAcierto){
@@ -447,7 +473,7 @@
               if(mScratch) scratchesPorJugador[jugador]++;
               if(mAce){ acesPorJugador[jugador]++; scratchesPorJugador[jugador]++; }
               const eq=this.jugadorEquipo[jugador];
-              if(eq){ puntosEquipo[eq]++; }
+              if(eq){ puntosEquipo[eq]=(puntosEquipo[eq]||0)+1; }
             }
           }else if(mPalo){
             jugador=mPalo[1]; if(palosPorJugador[jugador]!==undefined) palosPorJugador[jugador]++;
@@ -571,6 +597,7 @@
       }
     }
 
+    // ---------- Limpieza IRC básica ----------
     function limpiarLinea(linea){
       return linea
         .replace(/\x03\d{1,2}(?:,\d{1,2})?/g,"")
@@ -583,9 +610,12 @@
     }
     function limpiarArchivo(contenido){ return contenido.split("\n").map(limpiarLinea).join("\n"); }
 
+    // ---------- Detección de preguntas para cortar (robusta) ----------
     function encontrarPosicionesPreguntas(contenido){
-      const pos=[]; contenido.split("\n").forEach((l,i)=>{
-        if(/Pregunta:\s*\d+\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i.test(plain(l))) pos.push(i);
+      const pos=[];
+      contenido.split("\n").forEach((l,i)=>{
+        const pl = plain(l);
+        if(/(?:^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*)?.*Pregunta:\s*\d+\s*\/\s*\d+/i.test(pl)) pos.push(i);
       });
       return pos;
     }
@@ -609,6 +639,7 @@
       return partes;
     }
 
+    // ---------- Flujo principal ----------
     function handleFile(file){
       if(!file.name.match(/\.(txt|log)$/i)){ showMessage('Por favor selecciona un archivo .txt o .log','error'); return; }
       selectedFile=file; uploadText.textContent=`📎 ${file.name}`;
@@ -629,7 +660,7 @@
         try{
           const original = e.target.result;
 
-          // Fuente para ANÁLISIS (mantiene timestamps si el usuario no limpia)
+          // Fuente para ANÁLISIS (mantiene estructura; sin depender de cleanMax)
           let fuenteAnalisis = cleanIRC ? limpiarArchivo(original) : original;
 
           let analizador=null;
@@ -643,7 +674,7 @@
             anotado=analizador.anotarDatosEnLinea(fuenteAnalisis);
           }
 
-          // Fuente para SALIDA: aplicar limpieza máxima si procede (sobre el anotado)
+          // Fuente de SALIDA para el usuario (aplica limpieza máxima sobre lo anotado)
           let contenidoSalida = cleanMax ? limpiarArchivoMax(anotado) : anotado;
 
           const partes=dividirArchivo(contenidoSalida, numPartes);
