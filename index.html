@@ -139,20 +139,31 @@
       let skipScore = false;    // bloque "Puntuación de equipos"
       let skipAciertos = false; // bloque "Respuestas acertadas"
 
-      const shouldStopSkip = (pl) => (
-        parsePregunta(pl) || /La(s)?\s+buena(s)?:/i.test(pl) || /---/.test(pl) ||
-        /<[^>]+>/.test(pl) || /^\S+>/.test(pl) || />{2,3}\S+/.test(pl)
-      );
+      // Prefijo de nick: admite "<nick>" o "nick>"
+      const rxNickPrefix = /^(?:<[^>]+>|\S+>)/;
 
-      // Ránkings sin encabezado (equipos + individuales)
-      const rxRankingEquipos = /^\S+>\s*\d{1,3}\s*(?:º|o)?\s+\d{1,4}\s+[A-Z@ÁÉÍÓÚÑ][A-Z0-9@ÁÉÍÓÚÑ\-@]+$/;
-      const rxRankingIndiv   = /^\S+>\s*\d{1,3}\s*[·•\-]\s*[\S–—-]+$/;
+      // Ránking por equipos (ej: "Saga_Noren> 1º 31 LIDERES")
+      const rxRankingEquiposLoose =
+        /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*(?:º|o)\s+\d{1,4}\s+[A-Z0-9@ÁÉÍÓÚÑ\-]+$/;
+
+      // Ránking individual con puntito (ej: "Saga_Noren> 4 ·CLYDE82–DANI_1026–...")
+      const rxRankingIndivDot =
+        /^(?:<[^>]+>|\S+>)\s*\d{1,3}\s*[·•]\s*.+$/;
+
+      // Cortar bloques: dejamos de saltarlos cuando aparece algo “relevante”
+      const shouldStopSkip = (pl) => (
+        parsePregunta(pl) ||
+        /La(s)?\s+buena(s)?:/i.test(pl) ||
+        /---/.test(pl) ||
+        rxNickPrefix.test(pl) ||
+        />{2,3}\S+/.test(pl)
+      );
 
       for(let i=0;i<lineas.length;i++){
         let line = lineas[i];
         const pl = plain(line);
 
-        // Saltos activos
+        // Saltos activos de bloque
         if(skipScore){ if(shouldStopSkip(pl)) skipScore=false; else continue; }
         if(skipAciertos){ if(shouldStopSkip(pl)) skipAciertos=false; else continue; }
 
@@ -160,8 +171,12 @@
         if(/Puntuación\s+de\s+equipos/i.test(pl)){ skipScore=true; continue; }
         if(/Respuestas\s+acertadas/i.test(pl)){ skipAciertos=true; continue; }
 
-        // Ránkings sueltos (sin encabezado)
-        if(rxRankingEquipos.test(pl) || rxRankingIndiv.test(pl)) continue;
+        // RÁNKINGS SUELTOS (sin encabezado)
+        // 1) Equipos con ordinal (1º / 2º / 3º ...)
+        if(rxRankingEquiposLoose.test(pl)) continue;
+
+        // 2) Individuales con puntito "·" (y típicos guiones largos)
+        if(rxRankingIndivDot.test(pl)) continue;
 
         // “Base Datos Preguntas:” → eliminar SOLO el fragmento, no la línea
         if(/Base\s*Datos\s*Preguntas:/i.test(pl)){
@@ -173,7 +188,7 @@
           line = line.replace(/(\bLa(?:s)?\s+buena(?:s)?:[^]*?)(\s+Mandada\s+por:.*)$/i, "$1");
         }
 
-        // Quitar timestamps del inicio
+        // Quitar timestamps del inicio (admite 23:05:14''073)
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
         // Comprimir >>> a >>
@@ -182,7 +197,7 @@
         // Quitar '<' inicial de nick → "nick>"
         line = line.replace(/^<([^>]+)>/, "$1>");
 
-        // Filtrar micro-ruido mínimo (risas muy cortas, etc.)
+        // Filtrar micro-ruido muy corto (risas, etc.)
         const short = pl.trim().toLowerCase();
         if(short.length <= 6 && /^(j+a+|j+e+|lo+l+|uy+|uff+)$/.test(short)) continue;
 
