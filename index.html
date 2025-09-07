@@ -129,7 +129,7 @@
       let skipScore = false;       // bloque "Puntuación de equipos"
       let skipAciertos = false;    // bloque "Respuestas acertadas"
 
-      // Patrones de líneas-ránking
+      // Patrones de líneas-ránking (con o sin cabecera)
       const reLineaScore = /^\s*(?:<[^>]+>\s*)?\d+º?\s+\d+\s+\S+/i; // "<nick> 1º 121 LIDERES"
       const reLineaAciertos = /^\s*(?:<[^>]+>\s*)?\d+\s+[·\w\-]+/i; // "<nick> 9 ·JERONIMO–"
 
@@ -141,9 +141,7 @@
         if (skipScore) {
           if (reLineaScore.test(pl)) continue;
           skipScore = false;
-          // no continue: procesamos la línea que rompió el bloque
         }
-
         // ¿saltando bloque "Respuestas acertadas"?
         if (skipAciertos) {
           if (reLineaAciertos.test(pl)) continue;
@@ -151,14 +149,11 @@
         }
 
         // Inicios de bloques a omitir
-        if (/Puntuación\s+de\s+equipos/i.test(pl)) {
-          skipScore = true;
-          continue;
-        }
-        if (/Respuestas\s+acertadas/i.test(pl)) {
-          skipAciertos = true;
-          continue;
-        }
+        if (/Puntuación\s+de\s+equipos/i.test(pl)) { skipScore = true; continue; }
+        if (/Respuestas\s+acertadas/i.test(pl))    { skipAciertos = true; continue; }
+
+        // También eliminar ránkings sueltos aunque no haya cabecera
+        if (reLineaScore.test(pl) || reLineaAciertos.test(pl)) continue;
 
         // Quitar 'Mandada por: ...' manteniendo "La buena/Las buenas"
         if (/La(s)?\s+buena(s)?:/i.test(pl)) {
@@ -171,10 +166,10 @@
         // Quitar timestamps al inicio (ej. 23:00:12''257  o  23:00:12 )
         line = line.replace(/^\d{2}:\d{2}:\d{2}(?:''\d+)?\s*/, "");
 
-        // Quitar el "<" inicial del nick, pero conservar el ">" como separador: "<nick> hola" -> "nick> hola"
+        // Quitar el "<" inicial del nick, pero conservar el ">" como separador
         line = line.replace(/^<([^>]+)>/, "$1>");
 
-        // Compactar aciertos: ">>>NICK a 01''60" -> ">>NICK a 01''60"
+        // Compactar aciertos: ">>>NICK ..." -> ">>NICK ..."
         line = line.replace(/>>>/g, ">>");
 
         // Quitar líneas cortas de relleno tipo "xd", "jaja", "jeje", "lol" (conservador)
@@ -190,6 +185,13 @@
         out.push(line);
       }
       return out.join('\n');
+    }
+
+    // Helper: detecta líneas del bot tanto "<bot>" como "bot>"
+    function isBotAuthorLine(line, botNick){
+      if(!botNick) return false;
+      const pl = plain(line);
+      return pl.includes(`<${botNick}>`) || new RegExp(`^${botNick}>\\s*`).test(pl);
     }
 
     class AnalizadorPartida{
@@ -267,7 +269,6 @@
         const streakActual={}; // jugador -> longitud
         let recordRachaCortada={len:0,jugador:null,qCorte:null};
 
-        const isBotLine = l => this.botNick && plain(l).includes(`<${this.botNick}>`);
         const tsOf = l => { const m=plain(l).match(/^(\d{2}:\d{2}:\d{2})/); return m?m[1]:null; };
         const diffSec = (a,b)=>{
           const [h1,m1,s1]=a.split(':').map(Number), [h2,m2,s2]=b.split(':').map(Number);
@@ -333,7 +334,7 @@
             continue;
           }
 
-        if(isBotLine(linea) && currentQ!=null){
+          if(isBotAuthorLine(linea, this.botNick) && currentQ!=null){
             const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
             const mAce    =pl.match(/>>>(\S+)\s+acea/i);
             const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
@@ -390,7 +391,7 @@
           }
 
           // Contabilizar puntos en vivo para marcador sprint final
-          if(this.botNick && pl.includes(`<${this.botNick}>`)){
+          if(isBotAuthorLine(linea, this.botNick)){
             const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
             const mAce    =pl.match(/>>>(\S+)\s+acea/i);
             const mAcierto=pl.match(/>>>(\S+)\s+a\s+\d{2}''\d{2}/i);
@@ -404,7 +405,7 @@
           nuevas.push(linea);
 
           // Cierre de pregunta → insertar DATO EXTRA si toca
-          if(this.botNick && pl.includes(`<${this.botNick}>`) && currentQ!=null &&
+          if(isBotAuthorLine(linea, this.botNick) && currentQ!=null &&
              (/La buena:/i.test(pl) || /Las buenas:/i.test(pl))){
 
             // DIFICULTAD (única)
@@ -455,12 +456,9 @@
         for(const j in this.jugadorEquipo){ puntosPorJugador[j]=0; palosPorJugador[j]=0; acesPorJugador[j]=0; scratchesPorJugador[j]=0; }
         for(const e in this.equipos){ puntosEquipo[e]=0; }
 
-        let preguntaActual=null;
         for(const linea of contenidoHastaAqui.split('\n')){
           const pl = plain(linea);
-          const mQ=pl.match(/^(\d{2}:\d{2}:\d{2}).*Pregunta:\s*(\d+)\s*\/\s*\d+.*Base\s*Datos\s*Preguntas:/i);
-          if(mQ){ preguntaActual=parseInt(mQ[2],10); }
-          if(!this.botNick || !pl.includes(`<${this.botNick}>`)) continue;
+          if(!isBotAuthorLine(linea, this.botNick)) continue;
 
           const mScratch=pl.match(/>>>(\S+)\s+scratchea/i);
           const mAce    =pl.match(/>>>(\S+)\s+acea/i);
@@ -475,7 +473,7 @@
               if(mScratch) scratchesPorJugador[jugador]++;
               if(mAce){ acesPorJugador[jugador]++; scratchesPorJugador[jugador]++; }
               const eq=this.jugadorEquipo[jugador];
-              if(eq){ puntosEquipo[eq]++; }
+              if(eq){ puntosEquipo[eq]=(puntosEquipo[eq]||0)+1; }
             }
           }else if(mPalo){
             jugador=mPalo[1]; if(palosPorJugador[jugador]!==undefined) palosPorJugador[jugador]++;
@@ -527,7 +525,7 @@
 
         const titulo=esUltima?'🏁 MARCADOR FINAL:':'📈 MARCADOR EN EL CORTE:';
         extras.push(titulo);
-        for(const eq in puntosEquipo) extras.push(`${eq}: ${puntosEquipo[eq]} puntos`);
+        for(const eq in puntosEquipo) extras.push(`${eq}: ${puntosEquipo[eq]||0} puntos`);
 
         if(!esUltima){
           extras.push('\n⭐ LUCHA POR EL MVP:');
@@ -613,18 +611,11 @@
     function limpiarArchivo(contenido){ return contenido.split("\n").map(limpiarLinea).join("\n"); }
 
     function encontrarPosicionesPreguntas(contenido){
-  const pos = [];
-  const lineas = contenido.split("\n");
-  // Patrón más laxo: detecta "Pregunta: N / D" aunque no haya "Base Datos Preguntas:"
-  const rePregunta = /Pregunta:\s*\d+\s*\/\s*\d+/i;
-
-  lineas.forEach((l, i) => {
-    const pl = plain(l);              // normaliza códigos IRC
-    if (rePregunta.test(pl)) pos.push(i);
-  });
-
-  return pos;
-}
+      const pos=[]; contenido.split("\n").forEach((l,i)=>{
+        if(/Pregunta:\s*\d+\s*\/\s*\d+/i.test(plain(l))) pos.push(i);
+      });
+      return pos;
+    }
 
     function dividirArchivo(contenido,numPartes=4){
       const lineas=contenido.split("\n");
