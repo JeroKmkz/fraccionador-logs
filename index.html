@@ -255,51 +255,77 @@
       }
 
       procesarEquipos(contenido){
-        const lineas=contenido.split('\n');
-        let dentro=false, equipoActual=null;
-        for(const linea of lineas){
-          const pl = plain(linea);
-          if(pl.includes('--- Equipos participantes ---')){ dentro=true; continue; }
-          if(pl.includes('--- DATOS RESETEADOS ---')){ dentro=false; break; }
-          if(dentro && this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`))){
-            if(!pl.includes('>>>') && !pl.includes('>>')){
-              const posibles=['FOGUETES','LIDERES','KAMIKAZES','ATIPIK@S','REPESCA@S','HARDBE@TS','TELERINEZ'];
-              for(const eq of posibles){ if(pl.includes(eq)){ equipoActual=eq; this.equipos[eq]=[]; break; } }
-            }else if(equipoActual){
-              const m=pl.match(/>>>\s*(.+)|>>\s*(.+)/);
-              if(m){
-                const blob=(m[1]||m[2]||"").trim();
-                const jugadores=blob.split(/\s+/);
-                this.equipos[equipoActual]=jugadores;
-                jugadores.forEach(j=>{ this.jugadorEquipo[j]=equipoActual; });
+      const lineas = contenido.split('\n');
+      let dentro = false, equipoActual = null;
+    
+      for (const linea of lineas){
+        const pl = plain(linea);
+    
+        // abrir bloque de equipos
+        if (pl.includes('--- Equipos participantes ---')) { 
+          dentro = true; 
+          continue; 
+        }
+    
+        // ⛔ cerrar bloque de equipos en cuanto arranca la 1.ª pregunta
+        if (dentro && parsePregunta(pl)) { 
+          dentro = false; 
+        }
+    
+        if (dentro && this.botNick && (pl.includes(`<${this.botNick}>`) || pl.includes(`${this.botNick}>`))){
+          // línea con nombre de equipo (sin lista)
+          if (!pl.includes('>>>') && !pl.includes('>>')){
+            const posibles = ['FOGUETES','LIDERES','KAMIKAZES','ATIPIK@S','REPESCA@S','HARDBE@TS','TELERINEZ'];
+            for (const eq of posibles){
+              if (pl.includes(eq)){ 
+                equipoActual = eq; 
+                this.equipos[eq] = []; 
+                break; 
               }
             }
-          }
-        }
-        this.detectarJugadoresActivosEnTodoElLog();
-      }
-
-      detectarJugadoresActivosEnTodoElLog(){
-        const total=Object.keys(this.jugadorEquipo).length;
-        for(const linea of this.contenidoCompleto.split('\n')){
-          if(this.jugadoresActivos.size===total) break;
-          const pl = plain(linea);
-          const plNoTs = stripTsStart(pl);
-          const m = plNoTs.match(/<([^>]+)>|^(\S+)>/);
-          if(!m) continue;
-          const nick=(m[1]||m[2]);
-          if(nick===this.botNick ||
-             pl.includes('--- Equipos participantes ---') ||
-             pl.includes('>>>') || pl.includes('>>') ||
-             pl.includes('--- DATOS RESETEADOS ---') ||
-             parsePregunta(pl)) continue;
-          for(const jr in this.jugadorEquipo){
-            if(nick && nick.toLowerCase()===jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
-              this.jugadoresActivos.add(jr); break;
+          // línea con la lista de jugadores del equipo actual
+          } else if (equipoActual){
+            const m = pl.match(/>>>\s*(.+)|>>\s*(.+)/);
+            if (m){
+              const blob = (m[1] || m[2] || "").trim();
+              const jugadores = blob.split(/\s+/);
+              this.equipos[equipoActual] = jugadores;
+              jugadores.forEach(j => { this.jugadorEquipo[j] = equipoActual; });
             }
           }
         }
       }
+    
+      this.detectarJugadoresActivosEnTodoElLog();
+    }
+    
+    detectarJugadoresActivosEnTodoElLog(){
+      const total = Object.keys(this.jugadorEquipo).length;
+    
+      for (const linea of this.contenidoCompleto.split('\n')){
+        if (this.jugadoresActivos.size === total) break;
+    
+        const pl = plain(linea);
+        const plNoTs = stripTsStart(pl);
+        const m = plNoTs.match(/<([^>]+)>|^(\S+)>/);
+        if (!m) continue;
+    
+        const nick = (m[1] || m[2]);
+    
+        // saltos de contenido no “charla” del log
+        if (nick === this.botNick ||
+            pl.includes('--- Equipos participantes ---') ||
+            pl.includes('>>>') || pl.includes('>>') ||
+            parsePregunta(pl)) continue;
+    
+        for (const jr in this.jugadorEquipo){
+          if (nick && nick.toLowerCase() === jr.toLowerCase() && !this.jugadoresActivos.has(jr)){
+            this.jugadoresActivos.add(jr);
+            break;
+          }
+        }
+      }
+    }
 
       precomputarRecordsGlobales(contenido){
         const lineas=contenido.split('\n');
@@ -486,7 +512,7 @@
           const mScratch=pl.match(/>{2,3}(\S+)\s+scratchea/i);
           const mAce    =pl.match(/>{2,3}(\S+)\s+acea/i);
           const mAcierto=pl.match(/>{2,3}(\S+)\s+a\s+\d{2}''\d{2}/i);
-          const mPalo   =pl.match(/primer@?\s+sin\s+puntos:.*?>>{2,3}(\S+)/i);
+          const mPalo   = pl.match(/Palo:\s*>>{1,3}(\S+)/i);
 
           let jugador=null;
           if(mScratch || mAce || mAcierto){
